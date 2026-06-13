@@ -1,7 +1,6 @@
 ﻿local running = true
 
-local path =
-    "C:\\Users\\franc\\Desktop\\Mesen_2.1.1_Windows\\LuaScriptData\\DataExtractor\\mario_frames.csv"
+local path = "C:/Users/nadador frustrado/Desktop/git/4to/mario_MLP/Mario-MLP/Super Mario Bros. (World)/Data/mario_frames.csv"
 
 local csv = io.open(path, "w")
 

@@ -5,12 +5,12 @@
 local json = require("json")
 
 local file = io.open(
-    emu.getScriptDataFolder() .. "\\mario_mlp.json",
+    "C:/Users/nadador frustrado/Desktop/git/4to/mario_MLP/Mario-MLP/LuaScriptData/InputGenerator/mario_mlp.json",
     "r"
 )
 
 if not file then
-    emu.log("No se encontró mario_mlp.json")
+    emu.log("No se encontró mario_mlp.json ")
     return
 end
 
@@ -199,7 +199,7 @@ local function computeFrame()
 	
 	local falling = v > 0
     
-	local rawA = y[1] > 0.02
+	local rawA = y[1] > 0.004
 	local B = y[2] > 0.1
 	local U = y[3] > 0.5
 	local D = y[4] > 0.2
