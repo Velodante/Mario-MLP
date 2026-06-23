@@ -1,0 +1,251 @@
+﻿{
+  "WorkspaceByCpu": {
+    "Nes": {
+      "WatchEntries": [],
+      "Labels": [
+        {
+          "Address": 8192,
+          "MemoryType": "NesMemory",
+          "Label": "PpuControl_2000",
+          "Comment": "7  bit  0\r\n---- ----\r\nVPHB SINN\r\n|||| ||||\r\n|||| ||\u002B\u002B- Base nametable address\r\n|||| ||    (0 = $2000; 1 = $2400; 2 = $2800; 3 = $2C00)\r\n|||| |\u002B--- VRAM address increment per CPU read/write of PPUDATA\r\n|||| |     (0: add 1, going across; 1: add 32, going down)\r\n|||| \u002B---- Sprite pattern table address for 8x8 sprites\r\n||||       (0: $0000; 1: $1000; ignored in 8x16 mode)\r\n|||\u002B------ Background pattern table address (0: $0000; 1: $1000)\r\n||\u002B------- Sprite size (0: 8x8; 1: 8x16)\r\n|\u002B-------- PPU master/slave select\r\n|          (0: read backdrop from EXT pins; 1: output color on EXT pins)\r\n\u002B--------- Generate an NMI at the start of the\r\n           vertical blanking interval (0: off; 1: on)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 8193,
+          "MemoryType": "NesMemory",
+          "Label": "PpuMask_2001",
+          "Comment": "7  bit  0\r\n---- ----\r\nBGRs bMmG\r\n|||| ||||\r\n|||| |||\u002B- Display type: (0: color, 1: grayscale)\r\n|||| ||\u002B-- 1: Show background in leftmost 8 pixels of screen, 0: Hide\r\n|||| |\u002B--- 1: Show sprites in leftmost 8 pixels of screen, 0: Hide\r\n|||| \u002B---- 1: Show background\r\n|||\u002B------ 1: Show sprites\r\n||\u002B------- Emphasize red\r\n|\u002B-------- Emphasize green\r\n\u002B--------- Emphasize blue",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 8194,
+          "MemoryType": "NesMemory",
+          "Label": "PpuStatus_2002",
+          "Comment": "7  bit  0\r\n---- ----\r\nVSO. ....\r\n|||| ||||\r\n|||\u002B-\u002B\u002B\u002B\u002B- Least significant bits previously written into a PPU register\r\n|||        (due to register not being updated for this address)\r\n||\u002B------- Sprite overflow. The intent was for this flag to be set\r\n||         whenever more than eight sprites appear on a scanline, but a\r\n||         hardware bug causes the actual behavior to be more complicated\r\n||         and generate false positives as well as false negatives; see\r\n||         PPU sprite evaluation. This flag is set during sprite\r\n||         evaluation and cleared at dot 1 (the second dot) of the\r\n||         pre-render line.\r\n|\u002B-------- Sprite 0 Hit.  Set when a nonzero pixel of sprite 0 overlaps\r\n|          a nonzero background pixel; cleared at dot 1 of the pre-render\r\n|          line.  Used for raster timing.\r\n\u002B--------- Vertical blank has started (0: not in vblank; 1: in vblank).\r\n           Set at dot 1 of line 241 (the line *after* the post-render\r\n           line); cleared after reading $2002 and at dot 1 of the\r\n           pre-render line.",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 8195,
+          "MemoryType": "NesMemory",
+          "Label": "OamAddr_2003",
+          "Comment": "Set OAM address - Write only",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 8196,
+          "MemoryType": "NesMemory",
+          "Label": "OamData_2004",
+          "Comment": "Read/Write OAM data",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 8197,
+          "MemoryType": "NesMemory",
+          "Label": "PpuScroll_2005",
+          "Comment": "Set PPU scroll, write twice - Write only",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 8198,
+          "MemoryType": "NesMemory",
+          "Label": "PpuAddr_2006",
+          "Comment": "Set PPU address, write twice - Write only",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 8199,
+          "MemoryType": "NesMemory",
+          "Label": "PpuData_2007",
+          "Comment": "Read/Write VRAM",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16384,
+          "MemoryType": "NesMemory",
+          "Label": "Sq0Duty_4000",
+          "Comment": "DDLC VVVV\r\nDuty (D), envelope loop / length counter halt (L), constant volume (C), volume/envelope (V)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16385,
+          "MemoryType": "NesMemory",
+          "Label": "Sq0Sweep_4001",
+          "Comment": "EPPP NSSS\r\nSweep unit: enabled (E), period (P), negate (N), shift (S)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16386,
+          "MemoryType": "NesMemory",
+          "Label": "Sq0Timer_4002",
+          "Comment": "TTTT TTTT\r\nTimer low (T)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16387,
+          "MemoryType": "NesMemory",
+          "Label": "Sq0Length_4003",
+          "Comment": "LLLL LTTT\r\nLength counter load (L), timer high (T)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16388,
+          "MemoryType": "NesMemory",
+          "Label": "Sq1Duty_4004",
+          "Comment": "DDLC VVVV\r\nDuty (D), envelope loop / length counter halt (L), constant volume (C), volume/envelope (V)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16389,
+          "MemoryType": "NesMemory",
+          "Label": "Sq1Sweep_4005",
+          "Comment": "EPPP NSSS\r\nSweep unit: enabled (E), period (P), negate (N), shift (S)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16390,
+          "MemoryType": "NesMemory",
+          "Label": "Sq1Timer_4006",
+          "Comment": "TTTT TTTT\r\nTimer low (T)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16391,
+          "MemoryType": "NesMemory",
+          "Label": "Sq1Length_4007",
+          "Comment": "LLLL LTTT\r\nLength counter load (L), timer high (T)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16392,
+          "MemoryType": "NesMemory",
+          "Label": "TrgLinear_4008",
+          "Comment": "CRRR RRRR\r\nLength counter halt / linear counter control (C), linear counter load (R)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16394,
+          "MemoryType": "NesMemory",
+          "Label": "TrgTimer_400A",
+          "Comment": "TTTT TTTT\r\nTimer low (T)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16395,
+          "MemoryType": "NesMemory",
+          "Label": "TrgLength_400B",
+          "Comment": "LLLL LTTT\r\nLength counter load (L), timer high (T)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16396,
+          "MemoryType": "NesMemory",
+          "Label": "NoiseVolume_400C",
+          "Comment": "--LC VVVV\r\nEnvelope loop / length counter halt (L), constant volume (C), volume/envelope (V)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16398,
+          "MemoryType": "NesMemory",
+          "Label": "NoisePeriod_400E",
+          "Comment": "L--- PPPP\r\nLoop noise (L), noise period (P)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16399,
+          "MemoryType": "NesMemory",
+          "Label": "NoiseLength_400F",
+          "Comment": "LLLL L---\r\nLength counter load (L)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16400,
+          "MemoryType": "NesMemory",
+          "Label": "DmcFreq_4010",
+          "Comment": "IL-- RRRR\r\nIRQ enable (I), loop (L), frequency (R)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16401,
+          "MemoryType": "NesMemory",
+          "Label": "DmcCounter_4011",
+          "Comment": "-DDD DDDD\r\nLoad counter (D)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16402,
+          "MemoryType": "NesMemory",
+          "Label": "DmcAddress_4012",
+          "Comment": "AAAA AAAA\r\nSample address (A)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16403,
+          "MemoryType": "NesMemory",
+          "Label": "DmcLength_4013",
+          "Comment": "LLLL LLLL\r\nSample length (L)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16404,
+          "MemoryType": "NesMemory",
+          "Label": "SpriteDma_4014",
+          "Comment": "Writing $XX will upload 256 bytes of data from CPU page $XX00-$XXFF to the internal PPU OAM.",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16405,
+          "MemoryType": "NesMemory",
+          "Label": "ApuStatus_4015",
+          "Comment": "Read:\r\nIF-D NT21\r\nDMC interrupt (I), frame interrupt (F), DMC active (D), length counter \u003E 0 (N/T/2/1)\r\n\r\nWrite:\r\n---D NT21\r\nEnable DMC (D), noise (N), triangle (T), and pulse channels (2/1)",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16406,
+          "MemoryType": "NesMemory",
+          "Label": "Ctrl1_4016",
+          "Comment": "Read (NES - input):\r\n---4 3210\r\nRead data from controller port #1.\r\n\r\nWrite:\r\n---- ---A\r\nOutput data (strobe) to both controllers.",
+          "Flags": "None",
+          "Length": 1
+        },
+        {
+          "Address": 16407,
+          "MemoryType": "NesMemory",
+          "Label": "Ctrl2_FrameCtr_4017",
+          "Comment": "Read (NES - input):\r\n---4 3210\r\nRead data from controller port #2.\r\n\r\nWrite (Frame counter): MI-- ----\r\nMode (M, 0 = 4-step, 1 = 5-step), IRQ inhibit flag (I)",
+          "Flags": "None",
+          "Length": 1
+        }
+      ],
+      "Breakpoints": []
+    }
+  },
+  "TblMappings": []
+}

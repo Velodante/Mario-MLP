@@ -1,0 +1,38 @@
+local function Init()
+
+    local file = io.open(predPath, "r")
+
+    if not file then
+        emu.log("No pude abrir mario_mlp_pred.json")
+        return false
+    end
+
+    local content = file:read("*a")
+    file:close()
+
+    local pred = json.decode(content)
+
+    local trainFile = pred.train_file
+    targetFrame = pred.frame
+
+    emu.log("Train: " .. trainFile)
+    emu.log("Target frame: " .. tostring(targetFrame))
+
+    local csvPath =
+        dataDir .. trainFile
+
+    csvFile = io.open(csvPath, "r")
+
+    if not csvFile then
+
+        emu.log("No pude abrir:")
+        emu.log(csvPath)
+
+        return false
+    end
+
+    -- saltear cabecera
+    csvFile:read("*line")
+
+    return true
+end
