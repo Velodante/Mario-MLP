@@ -9952,10 +9952,10 @@
     },
     "ScriptWindow": {
       "RecentScripts": [
+        "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\TestRunner.lua",
+        "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\DataExtractor.lua",
         "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\InputGenerator.lua",
         "d:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\TestRunner.lua",
-        "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\DataExtractor.lua",
-        "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\TestRunner.lua",
         "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\CheckPred.lua",
         "d:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\prueba.lua",
         "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\prueba.lua"
@@ -9976,8 +9976,8 @@
         "Height": 718
       },
       "WindowLocation": {
-        "X": 750,
-        "Y": 231
+        "X": 1054,
+        "Y": 181
       },
       "WindowIsMaximized": false
     },
@@ -10067,7 +10067,7 @@
     "Items": [
       {
         "RomFile": {
-          "Path": "d:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\Super Mario Bros. (World).nes",
+          "Path": "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\Super Mario Bros. (World).nes",
           "InnerFile": "",
           "InnerFileIndex": 0
         },
@@ -10075,7 +10075,7 @@
       },
       {
         "RomFile": {
-          "Path": "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\Super Mario Bros. (World).nes",
+          "Path": "d:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\Super Mario Bros. (World).nes",
           "InnerFile": "",
           "InnerFileIndex": 0
         },
@@ -10141,8 +10141,8 @@
       "Height": 505
     },
     "WindowLocation": {
-      "X": 191,
-      "Y": 385
+      "X": 231,
+      "Y": 274
     },
     "WindowIsMaximized": false
   },

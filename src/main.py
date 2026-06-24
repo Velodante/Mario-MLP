@@ -34,9 +34,9 @@ class MarioMLP(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 125),
+            nn.Linear(input_dim, 95),
             nn.ReLU(),
-            nn.Linear(125, 64),
+            nn.Linear(95, 64),
             nn.ReLU(),
             nn.Linear(64, output_dim)
         )
@@ -48,9 +48,9 @@ class FitnessFutureMLP(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 95),
             nn.ReLU(),
-            nn.Linear(128, 64),
+            nn.Linear(95, 64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
@@ -64,13 +64,20 @@ def train_fitness_predictor_temporal(
     horizon=63,
     batch_size=256,
     lr=1e-3,
-    epochs=10
+    epochs=100
 ):
     X = np.asarray(X)
     FITNESS = np.asarray(FITNESS)
 
-    X_train = X[:-horizon]
-    y_train = FITNESS[horizon:]
+    # Solo recortar si horizon > 0
+    if horizon > 0:
+        X_train = X[:-horizon]
+        y_train = FITNESS[horizon:]
+    else:
+        X_train = X
+        y_train = FITNESS
+
+    print(f"[FitnessPredictor] Training data shapes: X={X_train.shape}, y={y_train.shape}")
 
     X_scaler = StandardScaler()
     X_train = X_scaler.fit_transform(X_train)
@@ -163,10 +170,11 @@ def ejecutar_test_runner_con_monitoreo():
     print("EJECUTANDO TEST RUNNER CON MONITOREO")
     print("="*60)
     
-    initial_mtime = None
+    # Borrar archivo de resultados anterior para detectar nueva escritura
     if RESULTS_FILE.exists():
-        initial_mtime = RESULTS_FILE.stat().st_mtime
-        print(f"Archivo de resultados existente detectado (modificado: {datetime.fromtimestamp(initial_mtime)})")
+        RESULTS_FILE.unlink()
+        print("Archivo de resultados anterior eliminado")
+    
     try:
         proceso = subprocess.Popen([
             str(MESEN),
@@ -177,31 +185,52 @@ def ejecutar_test_runner_con_monitoreo():
         print(f"Mesen iniciado con TestRunner (PID: {proceso.pid})")
         print("Monitoreando archivo de resultados...")
         
-        max_wait_time = 300
+        max_wait_time = 90  # 1.5 minutos máximo
         start_time = time.time()
         check_interval = 1
-        last_mtime = initial_mtime
+        last_mtime = None
         
         while True:
+            # Verificar si el proceso sigue vivo
             if proceso.poll() is not None:
-                print(f"Mesen se cerró inesperadamente (código: {proceso.returncode})")
+                print(f"❌ Mesen se cerró inesperadamente (código: {proceso.returncode})")
                 break
             
+            # Verificar timeout total
+            elapsed = time.time() - start_time
+            if elapsed > max_wait_time:
+                print(f"⚠️ Timeout: {max_wait_time}s excedidos")
+                print("🔴 Cerrando Mesen...")
+                proceso.terminate()
+                try:
+                    proceso.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proceso.kill()
+                    proceso.wait()
+                break
+            
+            # Verificar si el archivo de resultados fue modificado
             if RESULTS_FILE.exists():
                 current_mtime = RESULTS_FILE.stat().st_mtime
                 
                 if current_mtime != last_mtime:
-                    print(f"¡Archivo de resultados actualizado! (timestamp: {datetime.fromtimestamp(current_mtime)})")
+                    last_mtime = current_mtime
                     
+                    # Pequeña espera para asegurar que se termine de escribir
                     time.sleep(1)
                     
                     try:
                         with open(RESULTS_FILE, "r") as f:
-                            results = json.load(f)
+                            content = f.read()
+                            if not content.strip():
+                                continue
+                            
+                            results = json.loads(content)
                             
                         if "results" in results and len(results["results"]) > 0:
-                            print(f"✅ Archivo de resultados válido detectado con {len(results['results'])} tests")
+                            print(f"✅ Resultados válidos: {len(results['results'])} tests")
                             
+                            # Cerrar Mesen
                             print("🔴 Cerrando Mesen...")
                             proceso.terminate()
                             
@@ -209,34 +238,24 @@ def ejecutar_test_runner_con_monitoreo():
                                 proceso.wait(timeout=5)
                             except subprocess.TimeoutExpired:
                                 proceso.kill()
+                                proceso.wait()
                             
                             print("Mesen cerrado correctamente")
-                            
                             return results
-                    except json.JSONDecodeError:
-                        print("⏳ Archivo en proceso de escritura, esperando...")
-                        time.sleep(0.5)
-                        continue
-            
-            elapsed_time = time.time() - start_time
-            if elapsed_time > max_wait_time:
-                print(f"⚠️ Timeout: No se detectaron cambios en {max_wait_time} segundos")
-                print("Cerrando Mesen...")
-                proceso.terminate()
-                try:
-                    proceso.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proceso.kill()
-                break
+                            
+                    except (json.JSONDecodeError, Exception):
+                        # Archivo en escritura o corrupto, seguir esperando
+                        pass
             
             time.sleep(check_interval)
         
+        # Si salimos del bucle, intentar recuperar resultados parciales
         if RESULTS_FILE.exists():
             try:
                 with open(RESULTS_FILE, "r") as f:
                     results = json.load(f)
                     if "results" in results and len(results["results"]) > 0:
-                        print("\n📊 Resultados encontrados:")
+                        print(f"📊 Recuperados {len(results['results'])} resultados parciales")
                         return results
             except:
                 pass
@@ -249,8 +268,12 @@ def ejecutar_test_runner_con_monitoreo():
         if 'proceso' in locals():
             try:
                 proceso.terminate()
+                proceso.wait(timeout=5)
             except:
-                pass
+                try:
+                    proceso.kill()
+                except:
+                    pass
         return None
 
 def _sorted_files(pattern):
@@ -403,15 +426,81 @@ def entrenar_iterativo():
     # Escalar datos
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
-    X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32)
-    Y_train_tensor = torch.tensor(Y_train, dtype=torch.float32)
+    
+    # ==============================================
+    # ENTRENAR PREDICTOR DE FITNESS UNA SOLA VEZ
+    # Este predictor toma el frame actual y predice la fitness en t+horizon
+    # ==============================================
+    print("\n" + "="*70)
+    print("🔮 ENTRENANDO PREDICTOR DE FITNESS (UNA SOLA VEZ)")
+    print("="*70)
+    
+    # PASO 1: Preparar datos para el predictor de fitness
+    # El predictor mapea: frame(t) -> fitness(t+horizon)
+    # Por lo tanto, necesitamos pares (X[t], F[t+horizon])
+    X_for_fitness = X_train_scaled[:-horizon]  # Frames desde 0 hasta N-horizon-1
+    F_for_fitness = F_train[horizon:]          # Fitness desde horizon hasta N-1
+    
+    print(f"Datos para predictor de fitness:")
+    print(f"  X_for_fitness: {X_for_fitness.shape}")
+    print(f"  F_for_fitness: {F_for_fitness.shape}")
+    
+    fitness_model, fitness_X_scaler, fitness_y_scaler = train_fitness_predictor_temporal(
+        X=X_for_fitness,
+        FITNESS=F_for_fitness,
+        horizon=0,  # ¡IMPORTANTE! Ya no recortamos dentro de la función
+        epochs=100
+    )
+    
+    # Guardar el predictor de fitness para uso futuro
+    fitness_checkpoint = {
+        'model_state_dict': fitness_model.state_dict(),
+        'input_dim': list(fitness_model.parameters())[0].shape[1],
+        'X_scaler_mean': fitness_X_scaler.mean_.tolist(),
+        'X_scaler_scale': fitness_X_scaler.scale_.tolist(),
+        'y_scaler_mean': fitness_y_scaler.mean_.tolist(),
+        'y_scaler_scale': fitness_y_scaler.scale_.tolist(),
+    }
+    fitness_path = models_dir / "fitness_predictor.pt"
+    torch.save(fitness_checkpoint, fitness_path)
+    print(f"Predictor de fitness guardado en: {fitness_path}")
+    
+    # ==============================================
+    # PREPARAR ESTRUCTURA DE DATOS PARA ENTRENAMIENTO
+    # ==============================================
+    
+    # Para el entrenamiento de la red de inputs, necesitamos:
+    # - Frame actual t: X_train_scaled[t]
+    # - Frame siguiente t+1: X_train_scaled[t+1]
+    # - Inputs humanos en t+1: Y_train[t]
+    # - Fitness futura desde t+1: F_train[t+horizon]
+    
+    # Solo podemos usar frames donde tengamos todos estos datos disponibles
+    # t va desde 0 hasta N-horizon-1 (porque necesitamos t+horizon)
+    max_t = len(X_train_scaled) - horizon - 1
+    
+    # Crear arrays alineados
+    X_current_aligned = X_train_scaled[:max_t]  # Frame en tiempo t
+    X_next_aligned = X_train_scaled[1:max_t+1]  # Frame en tiempo t+1
+    Y_aligned = Y_train[:max_t]  # Inputs humanos en t+1
+    F_future_aligned = F_train[horizon:horizon+max_t]  # Fitness en t+horizon
+    
+    print(f"\nDatos alineados para entrenamiento:")
+    print(f"  X_current (t): {X_current_aligned.shape}")
+    print(f"  X_next (t+1): {X_next_aligned.shape}")
+    print(f"  Y (inputs t+1): {Y_aligned.shape}")
+    print(f"  F_future (t+horizon): {F_future_aligned.shape}")
+    
+    # Convertir a tensores
+    X_current_tensor = torch.tensor(X_current_aligned, dtype=torch.float32)
+    Y_aligned_tensor = torch.tensor(Y_aligned, dtype=torch.float32)
     
     # Intentar cargar modelo previo
     model, loaded_scaler, start_iter, alpha, prev_stats = cargar_ultimo_modelo()
     
     if model is None:
         model = MarioMLP(
-            input_dim=X_train_tensor.shape[1],
+            input_dim=X_current_tensor.shape[1],
             output_dim=6
         )
         start_iter = 0
@@ -420,15 +509,7 @@ def entrenar_iterativo():
     else:
         scaler = loaded_scaler
         print(f"Modelo cargado desde iteración {start_iter} con alpha={alpha}")
-    
-    # Entrenar fitness predictor (siempre desde cero con datos actuales)
-    fitness_model, fitness_X_scaler, fitness_y_scaler = train_fitness_predictor_temporal(
-        X=X_train_scaled,
-        FITNESS=F_train,
-        horizon=horizon,
-        epochs=50
-    )
-    
+       
     # Parámetros de ajuste
     max_iterations = 5
     learning_rate = 1e-3
@@ -438,6 +519,7 @@ def entrenar_iterativo():
     best_score = 0.0
     no_improve_count = 0
     patience = 3
+    batch_size = 256
     
     # Rango de alpha
     ALPHA_MIN = 0.001
@@ -447,9 +529,7 @@ def entrenar_iterativo():
     history = []
     
     iteration = start_iter
-
-    iterations_to_run = 3
-
+    iterations_to_run = 30
     target_iteration = start_iter + iterations_to_run
     
     while iteration < target_iteration:
@@ -468,57 +548,98 @@ def entrenar_iterativo():
         epochs_per_iter = 100
         for epoch in range(epochs_per_iter):
             total_loss = 0
-            batch_start_idx = 0
+            total_loss_imitation = 0
+            total_loss_fitness = 0
             
-            for i, (x, y) in enumerate(DataLoader(
-                TensorDataset(X_train_tensor, Y_train_tensor),
-                batch_size=256,
+            # Crear dataset y dataloader con los datos alineados
+            dataset = TensorDataset(X_current_tensor, Y_aligned_tensor)
+            loader = DataLoader(
+                dataset,
+                batch_size=batch_size,
                 shuffle=False
-            )):
+            )
+            
+            for batch_idx, (x_current, y_humano) in enumerate(loader):
                 optimizer.zero_grad()
                 
-                pred = model(x)
-                loss_imitation = loss_fn(pred, y)
+                # ==============================================
+                # PREDECIR INPUTS PARA EL FRAME SIGUIENTE
+                # La red recibe el frame actual t y predice inputs para t+1
+                # ==============================================
+                y_pred = model(x_current)
                 
-                batch_size = len(x)
+                # ==============================================
+                # LOSS DE IMITACIÓN: comparar con inputs humanos en t+1
+                # ==============================================
+                loss_imitation = loss_fn(y_pred, y_humano)
                 
-                if batch_start_idx + 63 < len(X_train_tensor):
-                    fitness_pred_scaled = fitness_model(x).squeeze(-1)
-                    
-                    end_idx = min(batch_start_idx + 63 + batch_size, len(F_train))
-                    fitness_real = F_train[batch_start_idx + 63: end_idx]
-                    
-                    fitness_real_scaled = fitness_y_scaler.transform(
-                        fitness_real.reshape(-1, 1)
-                    ).flatten()
-                    fitness_real_tensor = torch.tensor(
-                        fitness_real_scaled,
-                        dtype=torch.float32
-                    )
-                    
-                    min_len = min(len(fitness_real_tensor), len(fitness_pred_scaled))
-                    if min_len > 0:
-                        fitness_real_tensor = fitness_real_tensor[:min_len]
-                        fitness_pred_scaled = fitness_pred_scaled[:min_len]
-                        
-                        loss_fitness = torch.mean(
-                            torch.relu(fitness_real_tensor - fitness_pred_scaled)
-                        )
-                    else:
-                        loss_fitness = 0.0
-                else:
-                    loss_fitness = 0.0
+                # ==============================================
+                # EVALUAR CONSECUENCIAS DE LOS INPUTS PREDICHOS
+                # Usando el frame siguiente (t+1) con inputs sustituidos
+                # ==============================================
                 
+                # Calcular índices para este batch
+                start_idx = batch_idx * batch_size
+                end_idx = start_idx + len(x_current)
+                
+                # Obtener los frames siguientes (t+1) correspondientes
+                X_next_batch = X_next_aligned[start_idx:end_idx]
+                F_future_batch = F_future_aligned[start_idx:end_idx]
+                
+                # MODIFICACIÓN CLAVE: Reemplazar los inputs del frame siguiente
+                # con los inputs predichos por la red
+                X_next_modified = X_next_batch.copy()
+                X_next_modified[:, :6] = y_pred.detach().cpu().numpy()
+                
+                # Escalar el frame modificado con el scaler de fitness
+                X_next_modified_scaled = fitness_X_scaler.transform(X_next_modified)
+                X_next_modified_tensor = torch.tensor(
+                    X_next_modified_scaled, 
+                    dtype=torch.float32
+                )
+                
+                # Predecir fitness futura usando el frame siguiente modificado
+                with torch.no_grad():
+                    fitness_pred_scaled = fitness_model(X_next_modified_tensor)
+                
+                # Desescalar la predicción de fitness
+                fitness_pred = fitness_y_scaler.inverse_transform(
+                    fitness_pred_scaled.cpu().numpy().reshape(-1, 1)
+                ).flatten()
+                
+                # Convertir a tensores para el cálculo de pérdida
+                fitness_pred_tensor = torch.tensor(fitness_pred, dtype=torch.float32)
+                fitness_real_tensor = torch.tensor(F_future_batch, dtype=torch.float32)
+                
+                # Calcular pérdida de fitness
+                # Penalizar cuando la fitness predicha es menor que la fitness real
+                # (la red tomó una decisión peor que el humano)
+                fitness_diff = fitness_real_tensor - fitness_pred_tensor
+                
+                # Softplus para gradientes suaves
+                loss_fitness = torch.mean(
+                    torch.nn.functional.softplus(fitness_diff)
+                )
+                
+                # ==============================================
+                # LOSS TOTAL = IMITACIÓN + ALPHA * FITNESS
+                # ==============================================
                 loss = loss_imitation + alpha * loss_fitness
                 
                 loss.backward()
                 optimizer.step()
                 
                 total_loss += loss.item()
-                
-                batch_start_idx += batch_size
+                total_loss_imitation += loss_imitation.item()
+                total_loss_fitness += loss_fitness.item()
             
-            print(f"  Epoch {epoch+1}/{epochs_per_iter} loss: {total_loss:.4f}")
+            # Mostrar pérdidas separadas para debugging
+            if epoch % 10 == 0 or epoch == epochs_per_iter - 1:
+                print(f"  Epoch {epoch+1}/{epochs_per_iter} | "
+                      f"Total: {total_loss:.4f} | "
+                      f"Imitación: {total_loss_imitation:.4f} | "
+                      f"Fitness: {total_loss_fitness:.4f} | "
+                      f"Alpha: {alpha:.4f}")
         
         # Exportar modelo para pruebas
         exportar_modelo_y_scaler(model, scaler, output_file)
@@ -541,11 +662,7 @@ def entrenar_iterativo():
             [r['fitness'] for r in results['results']]
         )
         
-        best_fitness_seen = max(
-            best_fitness_seen,
-            avg_fitness
-        )
-
+        best_fitness_seen = max(best_fitness_seen, avg_fitness)
         fitness_score = np.log1p(avg_fitness) / np.log1p(best_fitness_seen)
         stats["avg_fitness"] = avg_fitness
         stats["fitness_score"] = fitness_score
@@ -573,7 +690,6 @@ def entrenar_iterativo():
             print("\n" + "="*70)
             print("🎉 ¡TODOS LOS TESTS PASARON! 🎉")
             print("="*70)
-            # Guardar modelo final
             final_path = models_dir / "model_final.pt"
             checkpoint = {
                 'model_state_dict': model.state_dict(),
@@ -590,27 +706,32 @@ def entrenar_iterativo():
             print(f"🎯 Modelo final guardado en: {final_path}")
             return model, results, history
         
-        # Ajustar alpha según resultados
-        if fitness_score > 0.9:
-            alpha *= 0.9
-            print(f"📉 Buen rendimiento ({pct_completados:.1f}% completados). Reduciendo alpha a {alpha:.4f}")
-        elif fitness_score > 0.7:
-            alpha *= 0.95
-            print(f"📈 ({pct_fallados:.1f}% fallados). Aumentando alpha a {alpha:.4f}")
-        elif fitness_score > 0.5:
-            # Rendimiento medio: ajuste suave
-            alpha *= 1.05
-            print(f"📊 Rendimiento medio ({pct_completados:.1f}% completados). Ajustando alpha a {alpha:.4f}")
+        # AJUSTE DE ALPHA CORREGIDO
+        if pct_completados >= 80:
+            # EXCELENTE: La red ya aprendió, puede explorar MÁS
+            alpha *= 1.1  # AUMENTAR alpha → "seguí innovando, vas bien"
+            print(f"✨ Excelente ({pct_completados:.1f}%). Aumentando exploración, alpha={alpha:.4f}")
+            
+        elif pct_completados >= 60:
+            # BUENO: Mantener el balance actual
+            alpha *= 1.0  # SIN CAMBIOS → "seguí así"
+            print(f"👍 Bueno ({pct_completados:.1f}%). Manteniendo alpha={alpha:.4f}")
+            
+        elif pct_completados >= 40:
+            # REGULAR: Reducir exploración, volver a lo seguro
+            alpha *= 0.9  # REDUCIR alpha → "imita más al humano, te estás desviando"
+            print(f"📊 Regular ({pct_completados:.1f}%). Reduciendo exploración, alpha={alpha:.4f}")
+            
+        elif pct_completados >= 20:
+            # MALO: Volver fuertemente a imitar al humano
+            alpha *= 0.8  # REDUCIR MUCHO → "copiá al humano, tus ideas no funcionan"
+            print(f"📈 Malo ({pct_completados:.1f}%). Imitando más, alpha={alpha:.4f}")
+            
         else:
-            # Bajo rendimiento: aumentar alpha significativamente
-            alpha *= 1.15
-            print(f"📈 Bajo rendimiento ({pct_completados:.1f}% completados). Aumentando alpha a {alpha:.4f}")
-        
-        alpha = np.clip(
-            alpha,
-            ALPHA_MIN,
-            ALPHA_MAX
-        )
+            # PÉSIMO: Casi solo imitar, reiniciar exploración
+            alpha = max(alpha * 0.7, ALPHA_MIN)  # REDUCIR DRÁSTICAMENTE
+            print(f"🚨 Crítico ({pct_completados:.1f}%). Imitación forzada, alpha={alpha:.4f}")
+        alpha = np.clip(alpha, ALPHA_MIN, ALPHA_MAX)
 
         # Verificar si mejoró
         if fitness_score > best_score:
@@ -620,7 +741,6 @@ def entrenar_iterativo():
             no_improve_count = 0
             print(f"✨ Nuevo mejor resultado: {pct_completados:.1f}% completados")
             
-            # Guardar mejor modelo
             best_path = models_dir / "model_best.pt"
             checkpoint = {
                 'model_state_dict': model.state_dict(),
@@ -638,7 +758,6 @@ def entrenar_iterativo():
             no_improve_count += 1
             print(f"⚠️ Sin mejora ({no_improve_count}/{patience} intentos)")
         
-        # Reducir learning rate si no hay mejora
         if no_improve_count >= patience:
             learning_rate *= 0.5
             print(f"📉 Reduciendo learning rate a {learning_rate}")
