@@ -34,9 +34,9 @@ class MarioMLP(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 95),
+            nn.Linear(input_dim, 97),
             nn.ReLU(),
-            nn.Linear(95, 64),
+            nn.Linear(97, 64),
             nn.ReLU(),
             nn.Linear(64, output_dim)
         )
@@ -48,9 +48,9 @@ class FitnessFutureMLP(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 95),
+            nn.Linear(input_dim, 97),
             nn.ReLU(),
-            nn.Linear(95, 64),
+            nn.Linear(97, 64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
@@ -185,7 +185,7 @@ def ejecutar_test_runner_con_monitoreo():
         print(f"Mesen iniciado con TestRunner (PID: {proceso.pid})")
         print("Monitoreando archivo de resultados...")
         
-        max_wait_time = 90  # 1.5 minutos máximo
+        max_wait_time = 120  # 2 minutos máximo
         start_time = time.time()
         check_interval = 1
         last_mtime = None
@@ -512,7 +512,7 @@ def entrenar_iterativo():
        
     # Parámetros de ajuste
     max_iterations = 5
-    learning_rate = 1e-3
+    learning_rate = 1e-2
     best_completados = 0
     best_alpha = alpha
     best_fitness_seen = 1.0
@@ -529,7 +529,7 @@ def entrenar_iterativo():
     history = []
     
     iteration = start_iter
-    iterations_to_run = 30
+    iterations_to_run = 3
     target_iteration = start_iter + iterations_to_run
     
     while iteration < target_iteration:
@@ -545,7 +545,7 @@ def entrenar_iterativo():
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         loss_fn = nn.MSELoss()
         
-        epochs_per_iter = 100
+        epochs_per_iter = 65
         for epoch in range(epochs_per_iter):
             total_loss = 0
             total_loss_imitation = 0
@@ -706,33 +706,29 @@ def entrenar_iterativo():
             print(f"🎯 Modelo final guardado en: {final_path}")
             return model, results, history
         
-        # AJUSTE DE ALPHA CORREGIDO
-        if pct_completados >= 80:
-            # EXCELENTE: La red ya aprendió, puede explorar MÁS
-            alpha *= 1.1  # AUMENTAR alpha → "seguí innovando, vas bien"
-            print(f"✨ Excelente ({pct_completados:.1f}%). Aumentando exploración, alpha={alpha:.4f}")
+        # Estrategia basada en completados vs fallados
+        if pct_completados >= 90:
+            # Casi perfecto: reducir alpha para estabilizar
+            alpha *= 0.95
+            print(f"🎯 Rendimiento excelente. Estabilizando con alpha={alpha:.4f}")
             
-        elif pct_completados >= 60:
-            # BUENO: Mantener el balance actual
-            alpha *= 1.0  # SIN CAMBIOS → "seguí así"
-            print(f"👍 Bueno ({pct_completados:.1f}%). Manteniendo alpha={alpha:.4f}")
+        elif pct_completados >= 70:
+            # Bueno: aumentar alpha para seguir mejorando
+            alpha *= 1.05
+            print(f"📈 Buen rendimiento. Aumentando alpha para mejorar: {alpha:.4f}")
             
         elif pct_completados >= 40:
-            # REGULAR: Reducir exploración, volver a lo seguro
-            alpha *= 0.9  # REDUCIR alpha → "imita más al humano, te estás desviando"
-            print(f"📊 Regular ({pct_completados:.1f}%). Reduciendo exploración, alpha={alpha:.4f}")
-            
-        elif pct_completados >= 20:
-            # MALO: Volver fuertemente a imitar al humano
-            alpha *= 0.8  # REDUCIR MUCHO → "copiá al humano, tus ideas no funcionan"
-            print(f"📈 Malo ({pct_completados:.1f}%). Imitando más, alpha={alpha:.4f}")
+            # Regular: aumentar alpha más agresivamente
+            alpha *= 1.15
+            print(f"⚠️ Rendimiento medio. Aumento agresivo de alpha: {alpha:.4f}")
             
         else:
-            # PÉSIMO: Casi solo imitar, reiniciar exploración
-            alpha = max(alpha * 0.7, ALPHA_MIN)  # REDUCIR DRÁSTICAMENTE
-            print(f"🚨 Crítico ({pct_completados:.1f}%). Imitación forzada, alpha={alpha:.4f}")
+            # Malo: fuerte aumento de alpha + reducir learning rate
+            alpha *= 1.25
+            learning_rate *= 0.8
+            print(f"🚨 Bajo rendimiento. Alpha={alpha:.4f}, LR={learning_rate}")
+            
         alpha = np.clip(alpha, ALPHA_MIN, ALPHA_MAX)
-
         # Verificar si mejoró
         if fitness_score > best_score:
             best_score = fitness_score

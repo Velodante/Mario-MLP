@@ -427,9 +427,28 @@ local function computeInputs()
     table.insert(rowData, lastRight)
     table.insert(rowData, marioX)
     table.insert(rowData, marioY)
-    
+
+    --------------------------------------------------
+    -- VELOCIDADES DE MARIO
+    --------------------------------------------------
+
+    local velX = emu.read(0x0057, emu.memType.nesDebug)
+
+    if velX > 127 then
+        velX = velX - 256
+    end
+
+    local velY = emu.read(0x009F, emu.memType.nesDebug)
+
+    if velY > 127 then
+        velY = velY - 256
+    end
+
+    table.insert(rowData, velX)
+    table.insert(rowData, velY)
+
     local marioTile = math.floor((marioX / 16) % 32)
-    
+
     for row = 1, 11 do
         for col = marioTile, marioTile + 6 do
             local bankCol = math.floor(col / 16) % 2

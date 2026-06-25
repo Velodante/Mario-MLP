@@ -30,7 +30,7 @@ emu.log(csvPath)
 
 -- Cabecera
 csv:write(
-    "A,B,UP,DOWN,LEFT,RIGHT,marioX,marioY,Fitness,"
+    "A,B,UP,DOWN,LEFT,RIGHT,marioX,marioY,velX,velY,Fitness,"
 )
 
 for i = 1, 77 do
@@ -117,6 +117,24 @@ function Main()
     
     local marioX = xHigh * 256 + xLow
     local marioY = y
+
+    ------------------------------------------------
+    -- VELOCIDADES
+    ------------------------------------------------
+
+    -- Velocidad horizontal
+    local velX = emu.read(0x0057, emu.memType.nesDebug)
+
+    if velX > 127 then
+        velX = velX - 256
+    end
+
+    -- Velocidad vertical
+    local velY = emu.read(0x009F, emu.memType.nesDebug)
+
+    if velY > 127 then
+        velY = velY - 256
+    end
     
     local playerState = emu.read(0x001D, emu.memType.nesDebug)
     local flagTaken = 0
@@ -141,6 +159,8 @@ function Main()
     table.insert(rowData, RightBtn)
     table.insert(rowData, marioX)
     table.insert(rowData, marioY)
+    table.insert(rowData, velX)
+    table.insert(rowData, velY)
     table.insert(rowData, fit)
     
     ------------------------------------------------

@@ -200,7 +200,24 @@ local function computeFrame()
     
     table.insert(rowData, marioX)
     table.insert(rowData, marioY)
-    
+
+    -- Mario velocity (2 features)
+
+    local velX = emu.read(0x0057, emu.memType.nesDebug)
+
+    if velX > 127 then
+        velX = velX - 256
+    end
+
+    local velY = emu.read(0x009F, emu.memType.nesDebug)
+
+    if velY > 127 then
+        velY = velY - 256
+    end
+
+    table.insert(rowData, velX)
+    table.insert(rowData, velY)
+
     local marioTile = math.floor((marioX / 16) % 32)
     
     -- Tiles (11 rows * 7 cols = 77 features)
@@ -231,7 +248,7 @@ local function computeFrame()
         table.insert(rowData, y)
     end
     
-    -- Total features: 6 + 2 + 77 + 10 = 95 features (matches model input_dim)
+    -- Total features: 6 + 2 + 2 + 77 + 10 = 97 features (matches model input_dim)
     
     -- Normalization using scaler from training
     for i = 1, #rowData do

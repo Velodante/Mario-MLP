@@ -1,2 +1,2 @@
-D:\Facultad\Año 4 Cuatri 1\Redes neuronales I\Mario-MLP\Super Mario Bros. (World)\Data\train_22.csv
+D:\Facultad\Año 4 Cuatri 1\Redes neuronales I\Mario-MLP\Super Mario Bros. (World)\Data\train_16.csv
 D:\Facultad\Año 4 Cuatri 1\Redes neuronales I\Mario-MLP\Super Mario Bros. (World)\Data
