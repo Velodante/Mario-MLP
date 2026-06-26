@@ -21,43 +21,49 @@ local RESULTS_FILE = TEST_FOLDER .. "/test_results.json"
 -- CARGA DEL MODELO
 -- ==============================================
 
-local file = io.open(MODEL_PATH, "r")
-if not file then
-    emu.log("No se encontró mario_mlp.json en: " .. MODEL_PATH)
-    return
-end
-
-local content = file:read("*a")
-file:close()
-
-local model = json.decode(content)
-
--- Cargar pesos y biases
-local state_dict = model.state_dict
-local weights = {}
-local biases = {}
-
-for key, value in pairs(state_dict) do
-    if key:match("weight") then
-        local layer_idx = tonumber(key:match("net%.(%d+)"))
-        weights[layer_idx] = value
-    elseif key:match("bias") then
-        local layer_idx = tonumber(key:match("net%.(%d+)"))
-        biases[layer_idx] = value
+local function loadModel()
+    local file = io.open(MODEL_PATH, "r")
+    if not file then
+        emu.log("No se encontró mario_mlp.json en: " .. MODEL_PATH)
+        return nil
     end
-end
 
-local W = {}
-local B = {}
-for i = 0, 4, 2 do
-    if weights[i] then
-        table.insert(W, weights[i])
-        table.insert(B, biases[i])
+    local content = file:read("*a")
+    file:close()
+
+    local model = json.decode(content)
+    
+    -- Cargar pesos y biases
+    local state_dict = model.state_dict
+    local weights = {}
+    local biases = {}
+
+    for key, value in pairs(state_dict) do
+        if key:match("weight") then
+            local layer_idx = tonumber(key:match("net%.(%d+)"))
+            weights[layer_idx] = value
+        elseif key:match("bias") then
+            local layer_idx = tonumber(key:match("net%.(%d+)"))
+            biases[layer_idx] = value
+        end
     end
-end
 
-local scaler_mean = model.scaler_mean
-local scaler_scale = model.scaler_scale
+    local W = {}
+    local B = {}
+    for i = 0, 4, 2 do
+        if weights[i] then
+            table.insert(W, weights[i])
+            table.insert(B, biases[i])
+        end
+    end
+
+    return {
+        W = W,
+        B = B,
+        scaler_mean = model.scaler_mean,
+        scaler_scale = model.scaler_scale
+    }
+end
 
 -- ==============================================
 -- FUNCIONES DE ACTIVACIÓN
@@ -92,39 +98,134 @@ local function dense(input, weights, bias)
     return output
 end
 
-local function forward(x)
-    local a = x
-    for layer = 1, #W do
-        local z = dense(a, W[layer], B[layer])
-        if layer < #W then
-            for i = 1, #z do
-                z[i] = relu(z[i])
+local function createForwardFunction(W, B)
+    return function(x)
+        local a = x
+        for layer = 1, #W do
+            local z = dense(a, W[layer], B[layer])
+            if layer < #W then
+                for i = 1, #z do
+                    z[i] = relu(z[i])
+                end
+            else
+                for i = 1, #z do
+                    z[i] = sigmoid(z[i])
+                end
             end
-        else
-            for i = 1, #z do
-                z[i] = sigmoid(z[i])
-            end
+            a = z
         end
-        a = z
+        return a
     end
-    return a
 end
 
 -- ==============================================
--- TILE CLASSIFIER
+-- TILE CLASSIFIER (COINCIDENTE CON DATAEXTRACTOR)
 -- ==============================================
 
 local function classifyTile(tile)
+    -- Aire
     if tile == 0x00 or tile == 0xC2 then
         return 0
     end
-    if tile == 0x12 or tile == 0x13 or tile == 0x14 or tile == 0x15 then
-        return 3
+
+    -- Bloque invisible
+    if tile == 0x5F then
+        return 0
     end
+
+    -- Moneda
     if tile == 0x26 then
-        return 4
+        return 5
     end
+
+    -- Todo lo demás sólido
     return 1
+end
+
+-- ==============================================
+-- FUNCIONES PARA LA MATRIZ DE BLOQUES (11x9 = 99)
+-- ==============================================
+
+local function getBlockMatrix(marioBlockX)
+    local blocks = {}
+
+    for i = 1, 99 do
+        blocks[i] = 0
+    end
+
+    for row = 1, 11 do
+        for dx = 0, 8 do
+            local worldCol = marioBlockX + dx
+
+            local bankCol = math.floor((worldCol % 32) / 16)
+            local localOffset = (bankCol == 1) and 13 or 0
+            local wrappedCol = worldCol % 16
+
+            local addr = 0x0500 + (row + localOffset) * 16 + wrappedCol
+            local tile = emu.read(addr, emu.memType.nesDebug)
+
+            local idx = (row - 1) * 9 + dx + 1
+            blocks[idx] = classifyTile(tile)
+        end
+    end
+
+    return blocks
+end
+
+local function placeMarioInMatrix(blocks, marioX, marioY, marioBlockX)
+    local colOffset = math.floor(marioX / 16) - marioBlockX
+    local rowOffset = math.floor((marioY - 32) / 16) + 1
+
+    if colOffset >= 0 and colOffset < 9 and rowOffset >= 1 and rowOffset <= 11 then
+        local idx = (rowOffset - 1) * 9 + colOffset + 1
+        blocks[idx] = 3  -- 3 representa a Mario
+    end
+end
+
+local function placeEnemiesInMatrix(blocks, marioBlockX)
+    for i = 0, 4 do
+        local enemySlot = emu.read(0x000F + i, emu.memType.nesDebug)
+
+        if enemySlot ~= 0 then
+            local xHigh = emu.read(0x006E + i, emu.memType.nesDebug)
+            local xLow  = emu.read(0x0087 + i, emu.memType.nesDebug)
+
+            local enemyX = xHigh * 256 + xLow
+            local enemyY = emu.read(0x00CF + i, emu.memType.nesDebug)
+
+            local colOffset = math.floor(enemyX / 16) - marioBlockX
+            local rowOffset = math.floor((enemyY - 32) / 16) + 1
+
+            if colOffset >= 0 and colOffset < 9 and rowOffset >= 1 and rowOffset <= 11 then
+                local idx = (rowOffset - 1) * 9 + colOffset + 1
+
+                -- Si no hay Mario en esa posición, poner enemigo
+                if blocks[idx] ~= 3 then
+                    blocks[idx] = 4  -- 4 representa enemigo
+                end
+            end
+        end
+    end
+end
+
+-- ==============================================
+-- FUNCIÓN PARA OBTENER VELOCIDADES
+-- ==============================================
+
+local function getMarioVelocities()
+    -- Velocidad horizontal
+    local velX = emu.read(0x0057, emu.memType.nesDebug)
+    if velX > 127 then
+        velX = velX - 256
+    end
+
+    -- Velocidad vertical
+    local velY = emu.read(0x009F, emu.memType.nesDebug)
+    if velY > 127 then
+        velY = velY - 256
+    end
+
+    return velX, velY
 end
 
 -- ==============================================
@@ -155,7 +256,7 @@ local function selectDominantDirection(up, down, left, right)
 end
 
 -- ==============================================
--- EVALUACIÓN DE RENDIMIENTO (CON VIDAS)
+-- EVALUACIÓN DE RENDIMIENTO
 -- ==============================================
 
 local function checkLevelComplete(marioX, playerState)
@@ -168,14 +269,19 @@ local function checkLevelComplete(marioX, playerState)
     return false
 end
 
--- Variables para detección de muerte por vidas
+-- Variables para detección de muerte
 local previousLives = -1
 local deathFrameCount = 0
 local DEATH_CONFIRMATION_FRAMES = 3
 
-local function checkDeath(playerState)
-    -- Leer vidas actuales (0x075A)
+local function checkDeath()
+    -- Leer vidas actuales con verificación de nil
     local currentLives = emu.read(0x075A, emu.memType.nesDebug)
+    
+    -- Si currentLives es nil, no podemos hacer nada
+    if currentLives == nil then
+        return false
+    end
     
     -- Si es la primera vez, inicializar
     if previousLives == -1 then
@@ -187,7 +293,6 @@ local function checkDeath(playerState)
     if currentLives < previousLives then
         deathFrameCount = deathFrameCount + 1
         if deathFrameCount >= DEATH_CONFIRMATION_FRAMES then
-            -- Actualizar vidas para la próxima
             previousLives = currentLives
             deathFrameCount = 0
             return true
@@ -201,7 +306,6 @@ local function checkDeath(playerState)
     return false
 end
 
--- Función para resetear el estado de vidas
 local function resetLivesTracker()
     previousLives = -1
     deathFrameCount = 0
@@ -215,10 +319,6 @@ local function calculateFitness(marioX, elapsedFrames)
     local fit = D_bonus - T_penalty + E_bonus
     return math.max(fit, 1e-5)
 end
-
--- ==============================================
--- FUNCIÓN PARA OBTENER MÁXIMO DE UNA TABLA
--- ==============================================
 
 local function tableMax(t)
     if not t or #t == 0 then
@@ -255,6 +355,12 @@ local startStatePath = ""
 local testsCompleted = false
 local HOLD_LIMIT = 21
 local initialized = false
+local initialX = nil
+
+-- Variables del modelo
+local forwardFunc = nil
+local scaler_mean = nil
+local scaler_scale = nil
 
 -- Variables para almacenar los inputs calculados
 local currentInputs = {
@@ -328,7 +434,12 @@ local function LoadGame(address, value)
     levelComplete = false
     playerDead = false
     holdA = 0
-    resetLivesTracker()  -- Resetear el tracker de vidas
+    resetLivesTracker()
+    
+    local xHigh = emu.read(0x006D, emu.memType.nesDebug) or 0
+    local xLow = emu.read(0x0086, emu.memType.nesDebug) or 0
+    initialX = xHigh * 256 + xLow
+    emu.log("Posición inicial: " .. initialX)
 end
 
 -- ==============================================
@@ -339,8 +450,13 @@ local function saveResults()
     local results = {
         timestamp = os.time(),
         total_tests = #testResults,
-        results = testResults
+        results = testResults,
+        initial_positions = {}
     }
+    
+    for i, result in ipairs(testResults) do
+        results.initial_positions[i] = result.initial_x or 50
+    end
     
     local file = io.open(RESULTS_FILE, "w")
     if file then
@@ -378,7 +494,8 @@ local function startNextTest()
         gameReady = false
         testStarted = false
         holdA = 0
-        resetLivesTracker()  -- Resetear tracker para el nuevo test
+        resetLivesTracker()
+        initialX = nil
     else
         emu.log("✅ Todos los tests completados!")
         testsCompleted = true
@@ -393,82 +510,62 @@ end
 -- ==============================================
 
 local function computeInputs()
-    if testsCompleted or not gameReady or not testStarted then
+    if testsCompleted or not gameReady or not testStarted or not forwardFunc then
         return
     end
     
     frameCount = frameCount + 1
     
     -- Leer estado de Mario
-    local xHigh = emu.read(0x006D, emu.memType.nesDebug)
-    local xLow = emu.read(0x0086, emu.memType.nesDebug)
+    local xHigh = emu.read(0x006D, emu.memType.nesDebug) or 0
+    local xLow = emu.read(0x0086, emu.memType.nesDebug) or 0
     local marioX = xHigh * 256 + xLow
-    local marioY = emu.read(0x00CE, emu.memType.nesDebug)
-    local playerState = emu.read(0x001D, emu.memType.nesDebug)
+    local marioY = emu.read(0x00CE, emu.memType.nesDebug) or 0
+    local playerState = emu.read(0x001D, emu.memType.nesDebug) or 0
     
     -- Obtener inputs anteriores
-    local buttonAB = emu.read(0x000A, emu.memType.nesDebug)
+    local buttonAB = emu.read(0x000A, emu.memType.nesDebug) or 0
     local lastA = (buttonAB & 0x80) ~= 0 and 1 or 0
     local lastB = (buttonAB & 0x40) ~= 0 and 1 or 0
-    local verticalInput = emu.read(0x000B, emu.memType.nesDebug)
-    local direction = emu.read(0x0003, emu.memType.nesDebug)
+    local verticalInput = emu.read(0x000B, emu.memType.nesDebug) or 0
+    local direction = emu.read(0x0003, emu.memType.nesDebug) or 0
     local lastUp = (verticalInput == 0x01) and 1 or 0
     local lastDown = (verticalInput == 0x02) and 1 or 0
     local lastLeft = (direction == 0x02) and 1 or 0
     local lastRight = (direction == 0x01) and 1 or 0
     
-    -- Construir vector de entrada
+    -- Obtener velocidades
+    local velX, velY = getMarioVelocities()
+    
+    -- Construir vector de entrada (6 inputs + 99 bloques + 2 velocidades = 107 features)
     local rowData = {}
+    
+    -- Inputs anteriores (6 features)
     table.insert(rowData, lastA)
     table.insert(rowData, lastB)
     table.insert(rowData, lastUp)
     table.insert(rowData, lastDown)
     table.insert(rowData, lastLeft)
     table.insert(rowData, lastRight)
-    table.insert(rowData, marioX)
-    table.insert(rowData, marioY)
-
-    --------------------------------------------------
-    -- VELOCIDADES DE MARIO
-    --------------------------------------------------
-
-    local velX = emu.read(0x0057, emu.memType.nesDebug)
-
-    if velX > 127 then
-        velX = velX - 256
-    end
-
-    local velY = emu.read(0x009F, emu.memType.nesDebug)
-
-    if velY > 127 then
-        velY = velY - 256
-    end
-
-    table.insert(rowData, velX)
-    table.insert(rowData, velY)
-
-    local marioTile = math.floor((marioX / 16) % 32)
-
-    for row = 1, 11 do
-        for col = marioTile, marioTile + 6 do
-            local bankCol = math.floor(col / 16) % 2
-            local offset = (bankCol == 1) and 13 or 0
-            local wrapped = col % 16
-            local addr = 0x0500 + (row + offset) * 16 + wrapped
-            local tile = emu.read(addr, emu.memType.nesDebug)
-            table.insert(rowData, classifyTile(tile))
-        end
+    
+    -- Calcular marioBlockX (igual que en DataExtractor)
+    local marioBlockX = math.floor(marioX / 16) - 2
+    
+    -- Construir matriz de bloques (99 features)
+    local blocks = getBlockMatrix(marioBlockX)
+    placeMarioInMatrix(blocks, marioX, marioY, marioBlockX)
+    placeEnemiesInMatrix(blocks, marioBlockX)
+    
+    -- Agregar bloques a rowData
+    for i = 1, 99 do
+        table.insert(rowData, blocks[i])
     end
     
-    for i = 0, 4 do
-        local base = 0x04B0 + i * 4
-        local x = emu.read(base + 0, emu.memType.nesDebug)
-        local y = emu.read(base + 1, emu.memType.nesDebug)
-        if x == 255 then x = 0 end
-        if y == 255 then y = 0 end
-        table.insert(rowData, x)
-        table.insert(rowData, y)
-    end
+    -- Agregar velocidades (2 features)
+    table.insert(rowData, velX)
+    table.insert(rowData, velY)
+    
+    -- Total features: 6 + 99 + 2 = 107
     
     -- Normalizar
     for i = 1, #rowData do
@@ -476,7 +573,7 @@ local function computeInputs()
     end
     
     -- Forward pass
-    local y = forward(rowData)
+    local y = forwardFunc(rowData)
     
     if not y or #y < 6 then
         return
@@ -498,10 +595,8 @@ local function computeInputs()
     local R = (dominantDir == "RIGHT")
     local B = probB > 0.5
     
-    -- CONTROL DEL BOTÓN A
-    local v = emu.read(0x009F, emu.memType.nesDebug)
-    if v > 127 then v = v - 256 end
-    local falling = v > 0
+    -- CONTROL DEL BOTÓN A (usando velY en lugar de leer 0x009F de nuevo)
+    local falling = velY > 0
     
     local rawA = probA > 0.5
     
@@ -531,10 +626,7 @@ local function computeInputs()
         right = R
     }
     
-    -- ==============================================
     -- EVALUACIÓN DE RENDIMIENTO
-    -- ==============================================
-    
     local currentFitness = calculateFitness(marioX, frameCount)
     table.insert(fitnessHistory, currentFitness)
     
@@ -545,8 +637,7 @@ local function computeInputs()
         noProgressFrames = noProgressFrames + 1
     end
     
-    -- Verificar muerte usando el contador de vidas (sin usar marioY)
-    if checkDeath(playerState) then
+    if checkDeath() then
         playerDead = true
         emu.log("💀 Mario murió en test " .. currentTestIndex)
     end
@@ -583,6 +674,7 @@ local function computeInputs()
             fitness = currentFitness,
             max_fitness = tableMax(fitnessHistory),
             final_x = marioX,
+            initial_x = initialX or 50,
             frames = frameCount,
             level_complete = levelComplete,
             player_dead = playerDead
@@ -608,24 +700,36 @@ local function sendInputs()
 end
 
 -- ==============================================
--- INICIALIZACIÓN
+-- FUNCIONES DE INICIALIZACIÓN (DIVIDIDAS)
 -- ==============================================
 
-local function Init()
-    if initialized then
-        return
+-- SUBFUNCIÓN 1: Cargar el modelo (rápida)
+local function initModel()
+    emu.log("Inicializando modelo...")
+    local modelData = loadModel()
+    if not modelData then
+        emu.log("Error al cargar el modelo")
+        return false
     end
-    initialized = true
     
-    emu.log("=== TEST RUNNER INICIADO ===")
+    forwardFunc = createForwardFunction(modelData.W, modelData.B)
+    scaler_mean = modelData.scaler_mean
+    scaler_scale = modelData.scaler_scale
     
+    emu.log("Modelo cargado correctamente")
+    return true
+end
+
+-- SUBFUNCIÓN 2: Listar archivos de prueba (rápida)
+local function initTestFiles()
+    emu.log("Listando archivos de prueba...")
     testFiles = listTestFiles()
     
     if #testFiles == 0 then
         emu.log("No se encontraron archivos test_*.mss en: " .. TEST_FOLDER)
         emu.log("No hay pruebas para ejecutar.")
         testsCompleted = true
-        return
+        return false
     end
     
     emu.log(string.format("Encontrados %d archivos de prueba:", #testFiles))
@@ -633,6 +737,12 @@ local function Init()
         emu.log(string.format("  %d: %s", i, file))
     end
     
+    return true
+end
+
+-- SUBFUNCIÓN 3: Configurar estado inicial (rápida)
+local function initState()
+    emu.log("Configurando estado inicial...")
     currentTestIndex = 1
     startStatePath = TEST_FOLDER .. "/" .. testFiles[currentTestIndex]
     loaded = false
@@ -640,10 +750,18 @@ local function Init()
     testStarted = false
     testsCompleted = false
     holdA = 0
-    resetLivesTracker()  -- Resetear tracker al inicio
+    resetLivesTracker()
+    initialX = nil
     
     emu.log("Esperando carga del primer test: " .. testFiles[currentTestIndex])
+    return true
+end
+
+-- SUBFUNCIÓN 4: Configurar callbacks (la más lenta - separada)
+local function initCallbacks()
+    emu.log("Configurando callbacks...")
     
+    -- Callback 1: Carga de savestate
     emu.addMemoryCallback(
         LoadGame,
         emu.callbackType.exec,
@@ -653,9 +771,60 @@ local function Init()
         emu.memType.nesMemory
     )
     
+    -- Callback 2: Cálculo de inputs (endFrame)
     emu.addEventCallback(computeInputs, emu.eventType.endFrame)
+    
+    -- Callback 3: Envío de inputs (inputPolled)
     emu.addEventCallback(sendInputs, emu.eventType.inputPolled)
+    
+    emu.log("Callbacks configurados correctamente")
+    return true
 end
 
--- Iniciar el test runner
-Init()
+-- SUBFUNCIÓN 5: Inicialización completa (llama a todas las subfunciones con delay)
+local function fullInit()
+    -- Si ya está inicializado, no hacer nada
+    if initialized then
+        return
+    end
+    
+    -- Paso 1: Cargar modelo (rápido)
+    if not initModel() then
+        return
+    end
+    
+    -- Paso 2: Listar archivos (rápido)
+    if not initTestFiles() then
+        return
+    end
+    
+    -- Paso 3: Configurar estado (rápido)
+    if not initState() then
+        return
+    end
+    
+    -- Paso 4: Configurar callbacks (más lento, pero necesario)
+    if not initCallbacks() then
+        return
+    end
+    
+    initialized = true
+    emu.log("=== TEST RUNNER INICIADO CORRECTAMENTE (Versión 11x9 = 99 bloques + velocidades) ===")
+end
+
+-- ==============================================
+-- INICIALIZACIÓN CON RETARDO
+-- ==============================================
+
+-- Función que se ejecutará después de un breve retardo
+local function delayedInit()
+    fullInit()
+end
+
+-- ==============================================
+-- PUNTO DE ENTRADA PRINCIPAL
+-- ==============================================
+
+emu.addEventCallback(delayedInit, emu.eventType.startFrame)
+
+emu.log("TestRunner cargado - Inicialización programada... (Versión 11x9 = 99 bloques + velocidades)")

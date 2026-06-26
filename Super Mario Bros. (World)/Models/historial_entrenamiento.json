@@ -1,0 +1,60 @@
+[
+  {
+    "iteration": 1,
+    "alpha": 0.01,
+    "porcentaje_promedio": 100.0,
+    "completados": 20.0,
+    "fallados": 80.0,
+    "avg_fitness": 399241.63495526003,
+    "porcentajes_nivel": [
+      {
+        "test_number": 4,
+        "porcentaje": 100,
+        "x_final": 3161,
+        "x_inicial": 1225,
+        "status": "complete"
+      }
+    ]
+  },
+  {
+    "iteration": 2,
+    "alpha": 0.0125,
+    "porcentaje_promedio": 100.0,
+    "completados": 20.0,
+    "fallados": 80.0,
+    "avg_fitness": 399251.23432522005,
+    "porcentajes_nivel": [
+      {
+        "test_number": 1,
+        "porcentaje": 100,
+        "x_final": 3161,
+        "x_inicial": 1459,
+        "status": "complete"
+      }
+    ]
+  },
+  {
+    "iteration": 3,
+    "alpha": 0.015625,
+    "porcentaje_promedio": 100.0,
+    "completados": 40.0,
+    "fallados": 60.0,
+    "avg_fitness": 798493.60747546,
+    "porcentajes_nivel": [
+      {
+        "test_number": 1,
+        "porcentaje": 100,
+        "x_final": 3161,
+        "x_inicial": 1459,
+        "status": "complete"
+      },
+      {
+        "test_number": 4,
+        "porcentaje": 100,
+        "x_final": 3161,
+        "x_inicial": 1225,
+        "status": "complete"
+      }
+    ]
+  }
+]

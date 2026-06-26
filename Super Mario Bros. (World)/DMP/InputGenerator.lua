@@ -70,12 +70,10 @@ local function sigmoid(x)
 end
 
 --------------------------------------------------
--- DENSE + FORWARD (CORREGIDO)
+-- DENSE + FORWARD
 --------------------------------------------------
 
 local function dense(input, weights, bias)
-    -- weights es una tabla de tablas: weights[neuron_output][input_feature]
-    -- dimensions: output_dim x input_dim
     local output_dim = #bias
     local input_dim = #input
     
@@ -83,7 +81,7 @@ local function dense(input, weights, bias)
     
     for j = 1, output_dim do
         local s = bias[j]
-        local weight_row = weights[j]  -- Obtener la fila de pesos para esta neurona
+        local weight_row = weights[j]
         
         for i = 1, input_dim do
             s = s + input[i] * weight_row[i]
@@ -119,22 +117,26 @@ local function forward(x)
 end
 
 --------------------------------------------------
--- TILE CLASSIFIER
+-- TILE CLASSIFIER (COINCIDENTE CON DATAEXTRACTOR)
 --------------------------------------------------
 
 local function classifyTile(tile)
+    -- Aire
     if tile == 0x00 or tile == 0xC2 then
         return 0
     end
-    
-    if tile == 0x12 or tile == 0x13 or tile == 0x14 or tile == 0x15 then
-        return 3
+
+    -- Bloque invisible
+    if tile == 0x5F then
+        return 0
     end
-    
+
+    -- Moneda
     if tile == 0x26 then
-        return 4
+        return 5
     end
-    
+
+    -- Todo lo demás sólido
     return 1
 end
 
@@ -147,11 +149,104 @@ local lastUp, lastDown = 0, 0
 local lastLeft, lastRight = 0, 1
 
 --------------------------------------------------
+-- FUNCIÓN PARA OBTENER LA MATRIZ DE BLOQUES (11x9 = 99)
+--------------------------------------------------
+
+local function getBlockMatrix(marioBlockX)
+    local blocks = {}
+
+    for i = 1, 99 do
+        blocks[i] = 0
+    end
+
+    for row = 1, 11 do
+        for dx = 0, 8 do
+            local worldCol = marioBlockX + dx
+
+            local bankCol = math.floor((worldCol % 32) / 16)
+            local localOffset = (bankCol == 1) and 13 or 0
+            local wrappedCol = worldCol % 16
+
+            local addr = 0x0500 + (row + localOffset) * 16 + wrappedCol
+            local tile = emu.read(addr, emu.memType.nesDebug)
+
+            local idx = (row - 1) * 9 + dx + 1
+            blocks[idx] = classifyTile(tile)
+        end
+    end
+
+    return blocks
+end
+
+--------------------------------------------------
+-- FUNCIÓN PARA COLOCAR MARIO EN LA MATRIZ
+--------------------------------------------------
+
+local function placeMarioInMatrix(blocks, marioX, marioY, marioBlockX)
+    local colOffset = math.floor(marioX / 16) - marioBlockX
+    local rowOffset = math.floor((marioY - 32) / 16) + 1
+
+    if colOffset >= 0 and colOffset < 9 and rowOffset >= 1 and rowOffset <= 11 then
+        local idx = (rowOffset - 1) * 9 + colOffset + 1
+        blocks[idx] = 3  -- 3 representa a Mario
+    end
+end
+
+--------------------------------------------------
+-- FUNCIÓN PARA COLOCAR ENEMIGOS EN LA MATRIZ
+--------------------------------------------------
+
+local function placeEnemiesInMatrix(blocks, marioBlockX)
+    for i = 0, 4 do
+        local enemySlot = emu.read(0x000F + i, emu.memType.nesDebug)
+
+        if enemySlot ~= 0 then
+            local xHigh = emu.read(0x006E + i, emu.memType.nesDebug)
+            local xLow  = emu.read(0x0087 + i, emu.memType.nesDebug)
+
+            local enemyX = xHigh * 256 + xLow
+            local enemyY = emu.read(0x00CF + i, emu.memType.nesDebug)
+
+            local colOffset = math.floor(enemyX / 16) - marioBlockX
+            local rowOffset = math.floor((enemyY - 32) / 16) + 1
+
+            if colOffset >= 0 and colOffset < 9 and rowOffset >= 1 and rowOffset <= 11 then
+                local idx = (rowOffset - 1) * 9 + colOffset + 1
+
+                -- Si no hay Mario en esa posición, poner enemigo
+                if blocks[idx] ~= 3 then
+                    blocks[idx] = 4  -- 4 representa enemigo
+                end
+            end
+        end
+    end
+end
+
+--------------------------------------------------
+-- FUNCIÓN PARA OBTENER VELOCIDADES
+--------------------------------------------------
+
+local function getMarioVelocities()
+    -- Velocidad horizontal
+    local velX = emu.read(0x0057, emu.memType.nesDebug)
+    if velX > 127 then
+        velX = velX - 256
+    end
+
+    -- Velocidad vertical
+    local velY = emu.read(0x009F, emu.memType.nesDebug)
+    if velY > 127 then
+        velY = velY - 256
+    end
+
+    return velX, velY
+end
+
+--------------------------------------------------
 -- FUNCIÓN PARA SELECCIONAR DIRECCIÓN PREDOMINANTE
 --------------------------------------------------
 
 local function selectDominantDirection(up, down, left, right)
-    -- Crear tabla con las probabilidades de cada dirección
     local directions = {
         {name = "UP", value = up},
         {name = "DOWN", value = down},
@@ -159,19 +254,14 @@ local function selectDominantDirection(up, down, left, right)
         {name = "RIGHT", value = right}
     }
     
-    -- Ordenar de mayor a menor probabilidad
     table.sort(directions, function(a, b) return a.value > b.value end)
     
-    -- Obtener la dirección con mayor probabilidad
     local best = directions[1]
     local second = directions[2]
     
-    -- Si la mejor dirección tiene probabilidad > 0.5 o es significativamente mayor que la segunda
-    -- (más de 0.2 de diferencia), la seleccionamos
     if best.value > 0.5 or (best.value - second.value) > 0.2 then
         return best.name
     else
-        -- Si ninguna dirección es claramente dominante, no presionamos ninguna
         return "NONE"
     end
 end
@@ -192,63 +282,33 @@ local function computeFrame()
     table.insert(rowData, lastLeft)
     table.insert(rowData, lastRight)
     
-    -- Mario position (2 features)
+    -- Obtener posición de Mario
     local xHigh = emu.read(0x006D, emu.memType.nesDebug)
     local xLow  = emu.read(0x0086, emu.memType.nesDebug)
     local marioX = xHigh * 256 + xLow
     local marioY = emu.read(0x00CE, emu.memType.nesDebug)
     
-    table.insert(rowData, marioX)
-    table.insert(rowData, marioY)
-
-    -- Mario velocity (2 features)
-
-    local velX = emu.read(0x0057, emu.memType.nesDebug)
-
-    if velX > 127 then
-        velX = velX - 256
+    -- Obtener velocidades (AHORA INCLUIDAS)
+    local velX, velY = getMarioVelocities()
+    
+    -- Calcular marioBlockX (igual que en DataExtractor)
+    local marioBlockX = math.floor(marioX / 16) - 2
+    
+    -- Construir matriz de bloques con Mario y enemigos (11x9 = 99)
+    local blocks = getBlockMatrix(marioBlockX)
+    placeMarioInMatrix(blocks, marioX, marioY, marioBlockX)
+    placeEnemiesInMatrix(blocks, marioBlockX)
+    
+    -- Agregar bloques a rowData (99 features)
+    for i = 1, 99 do
+        table.insert(rowData, blocks[i])
     end
-
-    local velY = emu.read(0x009F, emu.memType.nesDebug)
-
-    if velY > 127 then
-        velY = velY - 256
-    end
-
+    
+    -- Agregar velocidades (2 features)
     table.insert(rowData, velX)
     table.insert(rowData, velY)
-
-    local marioTile = math.floor((marioX / 16) % 32)
     
-    -- Tiles (11 rows * 7 cols = 77 features)
-    for row = 1, 11 do
-        for col = marioTile, marioTile + 6 do
-            local bankCol = math.floor(col / 16) % 2
-            local offset = (bankCol == 1) and 13 or 0
-            local wrapped = col % 16
-            
-            local addr = 0x0500 + (row + offset) * 16 + wrapped
-            local tile = emu.read(addr, emu.memType.nesDebug)
-            
-            table.insert(rowData, classifyTile(tile))
-        end
-    end
-    
-    -- Enemies (5 enemies * 2 coordinates = 10 features)
-    for i = 0, 4 do
-        local base = 0x04B0 + i * 4
-        
-        local x = emu.read(base + 0, emu.memType.nesDebug)
-        local y = emu.read(base + 1, emu.memType.nesDebug)
-        
-        if x == 255 then x = 0 end
-        if y == 255 then y = 0 end
-        
-        table.insert(rowData, x)
-        table.insert(rowData, y)
-    end
-    
-    -- Total features: 6 + 2 + 2 + 77 + 10 = 97 features (matches model input_dim)
+    -- Total features: 6 (inputs) + 99 (bloques) + 2 (velocidades) = 107 features
     
     -- Normalization using scaler from training
     for i = 1, #rowData do
@@ -271,13 +331,6 @@ local function computeFrame()
         }
     end
     
-    -- DEBUG LOG (probabilidades de la red)
-    emu.log(string.format(
-        "A=%.5f B=%.5f U=%.5f D=%.5f L=%.5f R=%.5f",
-        y[1] or 0, y[2] or 0, y[3] or 0, 
-        y[4] or 0, y[5] or 0, y[6] or 0
-    ))
-    
     -- Extraer probabilidades
     local probA = y[1] or 0
     local probB = y[2] or 0
@@ -299,10 +352,8 @@ local function computeFrame()
     local rawA = probA > 0.5
     local B = probB > 0.5
     
-    -- Mario state for special behavior
-    local v = emu.read(0x009F, emu.memType.nesDebug)
-    if v > 127 then v = v - 256 end
-    local falling = v > 0
+    -- Mario state for special behavior (usamos la velocidad vertical que ya tenemos)
+    local falling = velY > 0
     
     -- A button special handling (hold limit, falling prevention)
     local holdA = 0
@@ -342,7 +393,7 @@ local function computeFrame()
 end
 
 --------------------------------------------------
--- INPUT HOOK (IMPORTANT PART)
+-- INPUT HOOK
 --------------------------------------------------
 
 local function sendInputs()
@@ -359,4 +410,4 @@ emu.addEventCallback(
     emu.eventType.inputPolled
 )
 
-emu.log("InputGenerator cargado correctamente!")
+emu.log("InputGenerator cargado correctamente! (Versión 11x9 = 99 bloques + velocidades)")

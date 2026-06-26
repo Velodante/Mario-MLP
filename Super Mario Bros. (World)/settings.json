@@ -9804,26 +9804,31 @@
     },
     "TilemapViewer": {
       "ShowSettingsPanel": true,
-      "ImageScale": 1,
+      "ImageScale": 2,
       "ShowGrid": false,
       "ShowScrollOverlay": false,
-      "NesShowAttributeGrid": false,
+      "NesShowAttributeGrid": true,
       "NesShowAttributeByteGrid": false,
       "NesShowTilemapGrid": false,
       "TileHighlightMode": "None",
       "AttributeHighlightMode": "None",
       "DisplayMode": "Default",
       "RefreshTiming": {
-        "ConsoleConfig": {},
+        "ConsoleConfig": {
+          "Nes": {
+            "RefreshScanline": 240,
+            "RefreshCycle": 0
+          }
+        },
         "RefreshOnBreakPause": true,
         "AutoRefresh": true
       },
       "WindowSize": {
-        "Width": 0,
-        "Height": 0
+        "Width": 1192,
+        "Height": 1000
       },
       "WindowLocation": {
-        "X": 0,
+        "X": 722,
         "Y": 0
       },
       "WindowIsMaximized": false
@@ -9952,8 +9957,8 @@
     },
     "ScriptWindow": {
       "RecentScripts": [
-        "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\TestRunner.lua",
         "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\DataExtractor.lua",
+        "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\TestRunner.lua",
         "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\InputGenerator.lua",
         "d:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\TestRunner.lua",
         "D:\\Facultad\\A\u00F1o 4 Cuatri 1\\Redes neuronales I\\Mario-MLP\\Super Mario Bros. (World)\\DMP\\CheckPred.lua",
@@ -9973,11 +9978,11 @@
       "ScriptTimeout": 1,
       "WindowSize": {
         "Width": 780,
-        "Height": 718
+        "Height": 648
       },
       "WindowLocation": {
-        "X": 980,
-        "Y": 191
+        "X": 1106,
+        "Y": 75
       },
       "WindowIsMaximized": false
     },
@@ -10137,12 +10142,12 @@
   },
   "MainWindow": {
     "WindowSize": {
-      "Width": 512,
-      "Height": 505
+      "Width": 768,
+      "Height": 745
     },
     "WindowLocation": {
-      "X": 291,
-      "Y": 277
+      "X": 504,
+      "Y": 174
     },
     "WindowIsMaximized": false
   },

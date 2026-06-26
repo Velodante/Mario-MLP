@@ -9,6 +9,8 @@ from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
+import matplotlib.pyplot as plt
+import matplotlib
 import os
 from datetime import datetime
 import shutil
@@ -34,9 +36,9 @@ class MarioMLP(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 97),
+            nn.Linear(input_dim, 107),
             nn.ReLU(),
-            nn.Linear(97, 64),
+            nn.Linear(107, 64),
             nn.ReLU(),
             nn.Linear(64, output_dim)
         )
@@ -48,9 +50,9 @@ class FitnessFutureMLP(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 97),
+            nn.Linear(input_dim, 107),
             nn.ReLU(),
-            nn.Linear(97, 64),
+            nn.Linear(107, 64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
@@ -185,7 +187,7 @@ def ejecutar_test_runner_con_monitoreo():
         print(f"Mesen iniciado con TestRunner (PID: {proceso.pid})")
         print("Monitoreando archivo de resultados...")
         
-        max_wait_time = 120  # 2 minutos máximo
+        max_wait_time = 150  # 2 minutos máximo
         start_time = time.time()
         check_interval = 1
         last_mtime = None
@@ -288,6 +290,34 @@ def _sorted_files(pattern):
     files.sort(key=_num)
     return [str(p) for p in files]
 
+def visualizar_progreso(history):
+    """Muestra una tabla con el progreso de los porcentajes de completado"""
+    if not history:
+        return
+    
+    print("\n" + "="*80)
+    print("📈 EVOLUCIÓN DE PORCENTAJES DE COMPLETADO")
+    print("="*80)
+    print(f"{'Iter':^6} | {'Alpha':^8} | {'Promedio':^8} | {'Completados':^10} | {'Niveles (>50%)'} | {'Progreso'}")
+    print("-"*80)
+    
+    for h in history:
+        iter_num = h['iteration']
+        alpha = h['alpha']
+        promedio = h.get('porcentaje_promedio', 0)
+        completados = h['stats']['pct_completados']
+        
+        # Contar niveles con >50% completado
+        niveles_buenos = sum(1 for p in h.get('porcentajes_nivel', []) if p['porcentaje'] > 50)
+        total_niveles = len(h.get('porcentajes_nivel', []))
+        
+        # Barra de progreso simple
+        barra = '█' * int(promedio / 5) + '░' * (20 - int(promedio / 5))
+        
+        print(f"{iter_num:^6} | {alpha:^8.4f} | {promedio:^8.1f}% | {completados:^10.1f}% | {niveles_buenos}/{total_niveles} | {barra}")
+    
+    print("="*80)
+
 def cargar_partidas(lista_archivos):
     X_total = []
     Y_total = []
@@ -307,6 +337,204 @@ def cargar_partidas(lista_archivos):
     Y_total = np.vstack(Y_total)
     F_total = np.concatenate(F_total)
     return X_total, Y_total, F_total
+
+def calcular_porcentaje_completado(resultados_test, marioX_inicial=None):
+    """
+    Calcula el porcentaje de completado para cada nivel basado en la posición de Mario.
+    El porcentaje = (posicion_final - posicion_inicial) / (4128 - posicion_inicial) * 100
+    Donde 4128 es la posición en píxeles de la bandera (X = 258 bloques * 16 píxeles)
+    """
+    porcentajes = []
+    
+    for result in resultados_test:
+        if 'final_x' in result and result['final_x'] > 0:
+            # Si no tenemos la posición inicial, intentamos obtenerla del resultado
+            x_inicial = result.get('initial_x', marioX_inicial)
+            if x_inicial is None:
+                x_inicial = 50  # Valor por defecto
+            x_final = result['final_x']
+            
+            # Posición de la bandera en píxeles (258 bloques * 16 píxeles)
+            FLAG_POSITION = 4128
+            
+            # Calcular porcentaje
+            if x_final > x_inicial:
+                distancia_recorrida = x_final - x_inicial
+                distancia_total = FLAG_POSITION - x_inicial
+                porcentaje = (distancia_recorrida / distancia_total) * 100
+                # Cap en 100%
+                porcentaje = min(porcentaje, 100)
+            else:
+                porcentaje = 0
+            
+            # Si el nivel está completado según el status, forzar 100%
+            if result.get('status') == 'complete':
+                porcentaje = 100
+            
+            porcentajes.append({
+                'test_number': result.get('test_number', 0),
+                'porcentaje': porcentaje,
+                'x_final': x_final,
+                'x_inicial': x_inicial,
+                'status': result.get('status', 'unknown')
+            })
+    
+    return porcentajes
+
+def guardar_historial_csv(history, models_dir):
+    """Guarda el historial en formato CSV para análisis en Excel/Google Sheets"""
+    import csv
+    
+    csv_path = models_dir / "historial_entrenamiento.csv"
+    
+    # Determinar cuántos niveles hay
+    max_niveles = 0
+    for h in history:
+        if 'porcentajes_nivel' in h:
+            max_niveles = max(max_niveles, len(h['porcentajes_nivel']))
+    
+    # Crear encabezados
+    header = ['Iteracion', 'Alpha', 'Porcentaje_Promedio', 'Completados_Pct', 
+              'Fallados_Pct', 'Fitness_Avg']
+    
+    for i in range(max_niveles):
+        header.append(f'Nivel_{i+1}')
+    
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        
+        for h in history:
+            row = [
+                h['iteration'],
+                h['alpha'],
+                h['porcentaje_promedio'],
+                h['stats']['pct_completados'],
+                h['stats']['pct_fallados'],
+                h['stats'].get('avg_fitness', 0)
+            ]
+            
+            # Agregar porcentaje por nivel
+            for p in h.get('porcentajes_nivel', []):
+                row.append(p['porcentaje'])
+            
+            # Completar con ceros si hay menos niveles
+            while len(row) < len(header):
+                row.append(0)
+            
+            writer.writerow(row)
+    
+    print(f"📊 Historial CSV guardado en: {csv_path}")
+
+def guardar_historial_completo(history, models_dir):
+    """Guarda el historial completo incluyendo porcentajes por nivel"""
+    historial_path = models_dir / "historial_entrenamiento.json"
+    
+    # Preparar datos para JSON
+    historial_data = []
+    for h in history:
+        # Convertir a formato serializable
+        entry = {
+            'iteration': h['iteration'],
+            'alpha': h['alpha'],
+            'porcentaje_promedio': h['porcentaje_promedio'],
+            'completados': h['stats']['pct_completados'],
+            'fallados': h['stats']['pct_fallados'],
+            'avg_fitness': h['stats'].get('avg_fitness', 0),
+            'porcentajes_nivel': h['porcentajes_nivel']
+        }
+        historial_data.append(entry)
+    
+    with open(historial_path, 'w') as f:
+        json.dump(historial_data, f, indent=2)
+    
+    print(f"📊 Historial completo guardado en: {historial_path}")
+    return historial_path
+
+def generar_graficas_evolucion(history, models_dir):
+    """Genera gráficas de evolución de los porcentajes de completado"""
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib
+        matplotlib.use('Agg')
+        
+        iterations = [h['iteration'] for h in history]
+        porcentajes_promedio = [h.get('porcentaje_promedio', 0) for h in history]
+        completados = [h['stats']['pct_completados'] for h in history]
+        avg_fitness = [h['stats'].get('avg_fitness', 0) for h in history]
+        alphas = [h['alpha'] for h in history]
+        
+        # Crear figura con múltiples subplots
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        
+        # Gráfica 1: Porcentaje de completado promedio
+        axes[0, 0].plot(iterations, porcentajes_promedio, 'b-o', linewidth=2, markersize=8)
+        axes[0, 0].set_xlabel('Iteración', fontsize=12)
+        axes[0, 0].set_ylabel('Porcentaje completado promedio (%)', fontsize=12)
+        axes[0, 0].set_title('Evolución del porcentaje de completado', fontsize=14, fontweight='bold')
+        axes[0, 0].grid(True, alpha=0.3)
+        axes[0, 0].set_ylim(0, 105)
+        
+        # Gráfica 2: Tests completados vs fallados
+        axes[0, 1].plot(iterations, completados, 'g-o', linewidth=2, markersize=8, label='Completados')
+        axes[0, 1].plot(iterations, [h['stats']['pct_fallados'] for h in history], 'r-o', linewidth=2, markersize=8, label='Fallados')
+        axes[0, 1].set_xlabel('Iteración', fontsize=12)
+        axes[0, 1].set_ylabel('Porcentaje (%)', fontsize=12)
+        axes[0, 1].set_title('Evolución de tests completados vs fallados', fontsize=14, fontweight='bold')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True, alpha=0.3)
+        axes[0, 1].set_ylim(0, 105)
+        
+        # Gráfica 3: Fitness promedio
+        axes[1, 0].plot(iterations, avg_fitness, 'm-o', linewidth=2, markersize=8)
+        axes[1, 0].set_xlabel('Iteración', fontsize=12)
+        axes[1, 0].set_ylabel('Fitness promedio', fontsize=12)
+        axes[1, 0].set_title('Evolución del fitness promedio', fontsize=14, fontweight='bold')
+        axes[1, 0].grid(True, alpha=0.3)
+        
+        # Gráfica 4: Alpha
+        axes[1, 1].plot(iterations, alphas, 'orange-o', linewidth=2, markersize=8)
+        axes[1, 1].set_xlabel('Iteración', fontsize=12)
+        axes[1, 1].set_ylabel('Alpha', fontsize=12)
+        axes[1, 1].set_title('Evolución de Alpha', fontsize=14, fontweight='bold')
+        axes[1, 1].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        # Guardar gráfica
+        graph_path = models_dir / "evolucion_entrenamiento.png"
+        plt.savefig(graph_path, dpi=150, bbox_inches='tight')
+        print(f"📊 Gráfica guardada en: {graph_path}")
+        
+        # Gráfica simplificada del porcentaje de completado
+        fig2, ax2 = plt.subplots(figsize=(10, 6))
+        ax2.plot(iterations, porcentajes_promedio, 'b-o', linewidth=2, markersize=8)
+        
+        if len(porcentajes_promedio) > 0:
+            max_idx = np.argmax(porcentajes_promedio)
+            ax2.plot(iterations[max_idx], porcentajes_promedio[max_idx], 'r*', markersize=15, 
+                    label=f'Máximo: {porcentajes_promedio[max_idx]:.1f}% (Iter {iterations[max_idx]})')
+        
+        ax2.set_xlabel('Iteración', fontsize=12)
+        ax2.set_ylabel('Porcentaje de completado promedio (%)', fontsize=12)
+        ax2.set_title('Evolución del porcentaje de completado de niveles', fontsize=14, fontweight='bold')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        ax2.set_ylim(0, 105)
+        
+        simple_path = models_dir / "porcentaje_completado_evolucion.png"
+        plt.savefig(simple_path, dpi=150, bbox_inches='tight')
+        print(f"📊 Gráfica simple guardada en: {simple_path}")
+        
+        plt.close('all')
+        return graph_path
+        
+    except ImportError:
+        print("⚠️ matplotlib no instalado. No se pueden generar gráficas.")
+        return None
+    except Exception as e:
+        print(f"⚠️ Error al generar gráficas: {e}")
+        return None
 
 def exportar_modelo_y_scaler(modelo, scaler, archivo_salida):
     archivo_salida = Path(archivo_salida)
@@ -429,17 +657,13 @@ def entrenar_iterativo():
     
     # ==============================================
     # ENTRENAR PREDICTOR DE FITNESS UNA SOLA VEZ
-    # Este predictor toma el frame actual y predice la fitness en t+horizon
     # ==============================================
     print("\n" + "="*70)
     print("🔮 ENTRENANDO PREDICTOR DE FITNESS (UNA SOLA VEZ)")
     print("="*70)
     
-    # PASO 1: Preparar datos para el predictor de fitness
-    # El predictor mapea: frame(t) -> fitness(t+horizon)
-    # Por lo tanto, necesitamos pares (X[t], F[t+horizon])
-    X_for_fitness = X_train_scaled[:-horizon]  # Frames desde 0 hasta N-horizon-1
-    F_for_fitness = F_train[horizon:]          # Fitness desde horizon hasta N-1
+    X_for_fitness = X_train_scaled[:-horizon]
+    F_for_fitness = F_train[horizon:]
     
     print(f"Datos para predictor de fitness:")
     print(f"  X_for_fitness: {X_for_fitness.shape}")
@@ -448,11 +672,10 @@ def entrenar_iterativo():
     fitness_model, fitness_X_scaler, fitness_y_scaler = train_fitness_predictor_temporal(
         X=X_for_fitness,
         FITNESS=F_for_fitness,
-        horizon=0,  # ¡IMPORTANTE! Ya no recortamos dentro de la función
-        epochs=100
+        horizon=0,
+        epochs=200
     )
     
-    # Guardar el predictor de fitness para uso futuro
     fitness_checkpoint = {
         'model_state_dict': fitness_model.state_dict(),
         'input_dim': list(fitness_model.parameters())[0].shape[1],
@@ -469,21 +692,12 @@ def entrenar_iterativo():
     # PREPARAR ESTRUCTURA DE DATOS PARA ENTRENAMIENTO
     # ==============================================
     
-    # Para el entrenamiento de la red de inputs, necesitamos:
-    # - Frame actual t: X_train_scaled[t]
-    # - Frame siguiente t+1: X_train_scaled[t+1]
-    # - Inputs humanos en t+1: Y_train[t]
-    # - Fitness futura desde t+1: F_train[t+horizon]
-    
-    # Solo podemos usar frames donde tengamos todos estos datos disponibles
-    # t va desde 0 hasta N-horizon-1 (porque necesitamos t+horizon)
     max_t = len(X_train_scaled) - horizon - 1
     
-    # Crear arrays alineados
-    X_current_aligned = X_train_scaled[:max_t]  # Frame en tiempo t
-    X_next_aligned = X_train_scaled[1:max_t+1]  # Frame en tiempo t+1
-    Y_aligned = Y_train[:max_t]  # Inputs humanos en t+1
-    F_future_aligned = F_train[horizon:horizon+max_t]  # Fitness en t+horizon
+    X_current_aligned = X_train_scaled[:max_t]
+    X_next_aligned = X_train_scaled[1:max_t+1]
+    Y_aligned = Y_train[:max_t]
+    F_future_aligned = F_train[horizon:horizon+max_t]
     
     print(f"\nDatos alineados para entrenamiento:")
     print(f"  X_current (t): {X_current_aligned.shape}")
@@ -491,7 +705,6 @@ def entrenar_iterativo():
     print(f"  Y (inputs t+1): {Y_aligned.shape}")
     print(f"  F_future (t+horizon): {F_future_aligned.shape}")
     
-    # Convertir a tensores
     X_current_tensor = torch.tensor(X_current_aligned, dtype=torch.float32)
     Y_aligned_tensor = torch.tensor(Y_aligned, dtype=torch.float32)
     
@@ -511,8 +724,8 @@ def entrenar_iterativo():
         print(f"Modelo cargado desde iteración {start_iter} con alpha={alpha}")
        
     # Parámetros de ajuste
-    max_iterations = 5
-    learning_rate = 1e-2
+    max_iterations = 3
+    learning_rate = 1e-3
     best_completados = 0
     best_alpha = alpha
     best_fitness_seen = 1.0
@@ -521,11 +734,9 @@ def entrenar_iterativo():
     patience = 3
     batch_size = 256
     
-    # Rango de alpha
     ALPHA_MIN = 0.001
     ALPHA_MAX = 5.0
     
-    # Historial de resultados
     history = []
     
     iteration = start_iter
@@ -539,19 +750,18 @@ def entrenar_iterativo():
         print(f"   Alpha actual: {alpha:.4f}")
         print(f"{'='*70}")
         
-        # Entrenar el modelo con el alpha actual
+        # Entrenar el modelo
         print("\n📚 Entrenando modelo...")
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         loss_fn = nn.MSELoss()
         
-        epochs_per_iter = 65
+        epochs_per_iter = 200
         for epoch in range(epochs_per_iter):
             total_loss = 0
             total_loss_imitation = 0
             total_loss_fitness = 0
             
-            # Crear dataset y dataloader con los datos alineados
             dataset = TensorDataset(X_current_tensor, Y_aligned_tensor)
             loader = DataLoader(
                 dataset,
@@ -562,68 +772,39 @@ def entrenar_iterativo():
             for batch_idx, (x_current, y_humano) in enumerate(loader):
                 optimizer.zero_grad()
                 
-                # ==============================================
-                # PREDECIR INPUTS PARA EL FRAME SIGUIENTE
-                # La red recibe el frame actual t y predice inputs para t+1
-                # ==============================================
                 y_pred = model(x_current)
-                
-                # ==============================================
-                # LOSS DE IMITACIÓN: comparar con inputs humanos en t+1
-                # ==============================================
                 loss_imitation = loss_fn(y_pred, y_humano)
                 
-                # ==============================================
-                # EVALUAR CONSECUENCIAS DE LOS INPUTS PREDICHOS
-                # Usando el frame siguiente (t+1) con inputs sustituidos
-                # ==============================================
-                
-                # Calcular índices para este batch
                 start_idx = batch_idx * batch_size
                 end_idx = start_idx + len(x_current)
                 
-                # Obtener los frames siguientes (t+1) correspondientes
                 X_next_batch = X_next_aligned[start_idx:end_idx]
                 F_future_batch = F_future_aligned[start_idx:end_idx]
                 
-                # MODIFICACIÓN CLAVE: Reemplazar los inputs del frame siguiente
-                # con los inputs predichos por la red
                 X_next_modified = X_next_batch.copy()
                 X_next_modified[:, :6] = y_pred.detach().cpu().numpy()
                 
-                # Escalar el frame modificado con el scaler de fitness
                 X_next_modified_scaled = fitness_X_scaler.transform(X_next_modified)
                 X_next_modified_tensor = torch.tensor(
                     X_next_modified_scaled, 
                     dtype=torch.float32
                 )
                 
-                # Predecir fitness futura usando el frame siguiente modificado
                 with torch.no_grad():
                     fitness_pred_scaled = fitness_model(X_next_modified_tensor)
                 
-                # Desescalar la predicción de fitness
                 fitness_pred = fitness_y_scaler.inverse_transform(
                     fitness_pred_scaled.cpu().numpy().reshape(-1, 1)
                 ).flatten()
                 
-                # Convertir a tensores para el cálculo de pérdida
                 fitness_pred_tensor = torch.tensor(fitness_pred, dtype=torch.float32)
                 fitness_real_tensor = torch.tensor(F_future_batch, dtype=torch.float32)
                 
-                # Calcular pérdida de fitness
-                # Penalizar cuando la fitness predicha es menor que la fitness real
-                # (la red tomó una decisión peor que el humano)
                 fitness_diff = fitness_real_tensor - fitness_pred_tensor
-                
-                # Softplus para gradientes suaves
                 loss_fitness = torch.mean(
                     torch.nn.functional.softplus(fitness_diff)
                 )
                 
-                # ==============================================
-                # LOSS TOTAL = IMITACIÓN + ALPHA * FITNESS
-                # ==============================================
                 loss = loss_imitation + alpha * loss_fitness
                 
                 loss.backward()
@@ -633,7 +814,6 @@ def entrenar_iterativo():
                 total_loss_imitation += loss_imitation.item()
                 total_loss_fitness += loss_fitness.item()
             
-            # Mostrar pérdidas separadas para debugging
             if epoch % 10 == 0 or epoch == epochs_per_iter - 1:
                 print(f"  Epoch {epoch+1}/{epochs_per_iter} | "
                       f"Total: {total_loss:.4f} | "
@@ -648,9 +828,31 @@ def entrenar_iterativo():
         print("\n🧪 Ejecutando pruebas...")
         results = ejecutar_test_runner_con_monitoreo()
         
+        # ==============================================
+        # MANEJAR CASO DE RESULTS = NONE
+        # ==============================================
         if results is None:
-            print("❌ Error en las pruebas. Continuando con siguiente iteración...")
+            print("❌ Error en las pruebas. No se obtuvieron resultados.")
+            print("   Posibles causas:")
+            print("   - El TestRunner.lua tiene errores")
+            print("   - Los archivos test_*.mss no existen o están corruptos")
+            print("   - Mesen no pudo cargar correctamente")
+            print("   - El modelo exportado tiene formato incorrecto")
+            
+            # Continuar con la siguiente iteración
+            # Ajustar alpha para intentar mejorar
+            alpha *= 1.1
+            alpha = np.clip(alpha, ALPHA_MIN, ALPHA_MAX)
+            print(f"🔄 Ajustando alpha a {alpha:.4f} para la siguiente iteración")
             continue
+        
+        # ==============================================
+        # PROCESAR RESULTADOS VÁLIDOS
+        # ==============================================
+        
+        # Calcular porcentajes de completado
+        porcentajes_nivel = calcular_porcentaje_completado(results.get('results', []))
+        porcentaje_promedio = np.mean([p['porcentaje'] for p in porcentajes_nivel]) if porcentajes_nivel else 0
         
         # Analizar resultados
         stats = mostrar_resultados(results)
@@ -674,7 +876,10 @@ def entrenar_iterativo():
         history.append({
             'iteration': iteration,
             'alpha': alpha,
-            'stats': stats
+            'stats': stats,
+            'porcentajes_nivel': porcentajes_nivel,
+            'porcentaje_promedio': porcentaje_promedio,
+            'timestamp': datetime.now().isoformat()
         })
         
         # Guardar modelo
@@ -708,28 +913,21 @@ def entrenar_iterativo():
         
         # Estrategia basada en completados vs fallados
         if pct_completados >= 90:
-            # Casi perfecto: reducir alpha para estabilizar
             alpha *= 0.95
             print(f"🎯 Rendimiento excelente. Estabilizando con alpha={alpha:.4f}")
-            
         elif pct_completados >= 70:
-            # Bueno: aumentar alpha para seguir mejorando
             alpha *= 1.05
             print(f"📈 Buen rendimiento. Aumentando alpha para mejorar: {alpha:.4f}")
-            
         elif pct_completados >= 40:
-            # Regular: aumentar alpha más agresivamente
             alpha *= 1.15
             print(f"⚠️ Rendimiento medio. Aumento agresivo de alpha: {alpha:.4f}")
-            
         else:
-            # Malo: fuerte aumento de alpha + reducir learning rate
             alpha *= 1.25
             learning_rate *= 0.8
             print(f"🚨 Bajo rendimiento. Alpha={alpha:.4f}, LR={learning_rate}")
             
         alpha = np.clip(alpha, ALPHA_MIN, ALPHA_MAX)
-        # Verificar si mejoró
+        
         if fitness_score > best_score:
             best_score = fitness_score
             best_completados = pct_completados
@@ -766,6 +964,23 @@ def entrenar_iterativo():
         print(f"   Fitness score: {fitness_score:.4f}")
         print(f"   Alpha: {old_alpha:.4f} -> {alpha:.4f}")
         print(f"   Learning rate: {learning_rate}")
+        print(f"   Porcentaje completado promedio: {porcentaje_promedio:.1f}%")
+    
+    # Al final del entrenamiento
+    if history:
+        print("\n" + "="*70)
+        print("📊 GUARDANDO HISTORIAL Y GENERANDO GRÁFICAS")
+        print("="*70)
+        
+        # Guardar historial en JSON y CSV
+        guardar_historial_completo(history, models_dir)
+        guardar_historial_csv(history, models_dir)
+        
+        # Mostrar visualización de progreso
+        visualizar_progreso(history)
+        
+        # Generar gráficas
+        generar_graficas_evolucion(history, models_dir)
     
     exportar_mejor_modelo()
     print(f"\n⚠️ Se alcanzó el máximo de iteraciones ({max_iterations})")
@@ -774,19 +989,39 @@ def entrenar_iterativo():
 def main():
     model, results, history = entrenar_iterativo()
 
-    if results is not None:
+    if results is not None and history:
         print("\n✅ Entrenamiento completado con éxito!")
         print(f"📊 Historial de {len(history)} iteraciones:")
 
         for h in history:
+            porcentaje = h.get('porcentaje_promedio', 0)
             print(
                 f"  Iter {h['iteration']}: "
                 f"alpha={h['alpha']:.4f}, "
-                f"completados={h['stats']['pct_completados']:.1f}%"
+                f"completados={h['stats']['pct_completados']:.1f}%, "
+                f"porcentaje_niveles={porcentaje:.1f}%"
             )
+        
+        # Mostrar resultados finales
+        print("\n📊 MEJORES RESULTADOS:")
+        mejor_iter = max(history, key=lambda x: x.get('porcentaje_promedio', 0))
+        print(f"  Mejor porcentaje de completado: {mejor_iter['porcentaje_promedio']:.1f}% (Iter {mejor_iter['iteration']})")
+        
+        ultima_iter = history[-1]
+        print(f"\n  Última iteración ({ultima_iter['iteration']}):")
+        for p in ultima_iter.get('porcentajes_nivel', []):
+            status_emoji = "✅" if p['status'] == 'complete' else "❌"
+            print(f"    {status_emoji} Nivel {p['test_number']}: {p['porcentaje']:.1f}% (X: {p['x_final']:.0f})")
+            
     else:
-        print("\nEntrenamiento completado")
-
+        print("\n⚠️ Entrenamiento completado sin resultados.")
+        if history:
+            print(f"Se completaron {len(history)} iteraciones pero no se obtuvieron resultados válidos.")
+            print("Posibles causas:")
+            print("  - Problemas con la ejecución de Mesen")
+            print("  - Archivos de prueba (test_*.mss) corruptos")
+            print("  - Configuración incorrecta de rutas")
 
 if __name__ == "__main__":
     main()
+    #exportar_mejor_modelo()

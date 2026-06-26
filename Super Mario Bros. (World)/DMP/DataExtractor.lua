@@ -28,40 +28,38 @@ end
 emu.log("CSV:")
 emu.log(csvPath)
 
--- Cabecera
+-- Cabecera - CON VELOCIDADES
 csv:write(
-    "A,B,UP,DOWN,LEFT,RIGHT,marioX,marioY,velX,velY,Fitness,"
+    "A,B,UP,DOWN,LEFT,RIGHT,Fitness,"
 )
 
-for i = 1, 77 do
-    csv:write("Bloque" .. string.format("%03d", i) .. ",")
-end
-
-for i = 1, 5 do
-    csv:write(
-        "Enemigo" .. i .. "x," ..
-        "Enemigo" .. i .. "y"
-    )
-    if i < 5 then
+for i = 1, 99 do
+    csv:write("Bloque" .. string.format("%03d", i))
+    if i < 99 then
         csv:write(",")
     end
 end
 
-csv:write("\n")
+csv:write(",VelX,VelY\n")
 
 local function classifyTile(tile)
+
+    -- Aire
     if tile == 0x00 or tile == 0xC2 then
         return 0
     end
-    
-    if tile == 0x12 or tile == 0x13 or tile == 0x14 or tile == 0x15 then
-        return 3
+
+    -- Bloque invisible
+    if tile == 0x5F then
+        return 0
     end
-    
+
+    -- Moneda
     if tile == 0x26 then
-        return 4
+        return 5
     end
-    
+
+    -- Todo lo demás sólido
     return 1
 end
 
@@ -83,6 +81,156 @@ local function fitness(marioX, elapsedFrames, flagTaken)
     
     local fit = D_bonus - T_penalty + E_bonus + W_bonus
     return math.max(fit, 1e-5)
+end
+
+-- ==============================================
+-- FUNCIÓN PARA OBTENER LA MATRIZ DE BLOQUES
+-- ==============================================
+
+local function getBlockMatrix(marioBlockX)
+
+    local blocks = {}
+
+    for i = 1,99 do
+        blocks[i] = 0
+    end
+
+    for row = 1,11 do
+        for dx = 0,8 do
+
+            local worldCol = marioBlockX + dx
+
+            local bankCol = math.floor((worldCol % 32) / 16)
+            local localOffset = (bankCol == 1) and 13 or 0
+            local wrappedCol = worldCol % 16
+
+            local addr =
+                0x0500 +
+                (row + localOffset) * 16 +
+                wrappedCol
+
+            local tile = emu.read(addr, emu.memType.nesDebug)
+
+            local idx = (row-1) * 9 + dx + 1
+
+            blocks[idx] = classifyTile(tile)
+        end
+    end
+
+    return blocks
+end
+
+-- ==============================================
+-- FUNCIÓN PARA COLOCAR MARIO EN LA MATRIZ
+-- ==============================================
+
+local function placeMarioInMatrix(blocks, marioX, marioY, marioBlockX)
+
+    local colOffset = math.floor(marioX / 16) - marioBlockX
+
+    local rowOffset = math.floor((marioY - 32) / 16) + 1
+
+    if colOffset >= 0 and colOffset < 9 and
+       rowOffset >= 1 and rowOffset <= 11 then
+
+        local idx = (rowOffset - 1) * 9 + colOffset + 1
+        blocks[idx] = 3
+    end
+end
+
+-- ==============================================
+-- FUNCIÓN PARA COLOCAR ENEMIGOS EN LA MATRIZ
+-- ==============================================
+
+local function placeEnemiesInMatrix(blocks, marioBlockX)
+
+    for i = 0,4 do
+
+        local enemySlot = emu.read(0x000F + i, emu.memType.nesDebug)
+
+        if enemySlot ~= 0 then
+
+            local xHigh = emu.read(0x006E + i, emu.memType.nesDebug)
+            local xLow  = emu.read(0x0087 + i, emu.memType.nesDebug)
+
+            local enemyX = xHigh * 256 + xLow
+            local enemyY = emu.read(0x00CF + i, emu.memType.nesDebug)
+
+            local colOffset = math.floor(enemyX / 16) - marioBlockX
+            local rowOffset = math.floor((enemyY - 32) / 16) + 1
+
+            if colOffset >= 0 and colOffset < 9 and
+               rowOffset >= 1 and rowOffset <= 11 then
+
+                local idx = (rowOffset - 1) * 9 + colOffset + 1
+
+                if blocks[idx] ~= 3 then
+                    blocks[idx] = 4
+                end
+            end
+        end
+    end
+end
+
+-- ==============================================
+-- VELOCIDADES DE MARIO
+-- ==============================================
+
+local function getMarioVelocities()
+    -- Velocidad horizontal
+    local velX = emu.read(0x0057, emu.memType.nesDebug)
+    if velX > 127 then
+        velX = velX - 256
+    end
+
+    -- Velocidad vertical
+    local velY = emu.read(0x009F, emu.memType.nesDebug)
+    if velY > 127 then
+        velY = velY - 256
+    end
+
+    return velX, velY
+end
+
+-- ==============================================
+-- VISUALIZAR MATRIZ (OPCIONAL)
+-- ==============================================
+
+local SHOW_VISUALIZATION = false  -- Cambiar a true para ver la matriz
+
+local function drawBlocks(blocks)
+    if not SHOW_VISUALIZATION then
+        return
+    end
+
+    local ox = 20
+    local oy = 20
+    local cell = 16
+
+    for row = 0, 10 do
+        for col = 0, 8 do
+            local idx = row * 9 + col + 1
+            local v = blocks[idx]
+
+            local x = ox + col * cell
+            local y = oy + row * cell
+
+            local color = 0xFF000000
+
+            if v == 0 then
+                color = 0xFFFFFFFF
+            elseif v == 1 then
+                color = 0xFF555555
+            elseif v == 3 then
+                color = 0xFF00FF00
+            elseif v == 4 then
+                color = 0xFFFF0000
+            end
+
+            emu.drawRectangle(x, y, cell, cell, color, true)
+            emu.drawString(x + 4, y + 3, tostring(v), 0xFF000000, 0x00000000)
+        end
+    end
 end
 
 local frameCount = 0
@@ -113,29 +261,16 @@ function Main()
     ------------------------------------------------
     local xHigh = emu.read(0x006D, emu.memType.nesDebug)
     local xLow  = emu.read(0x0086, emu.memType.nesDebug)
-    local y = emu.read(0x00CE, emu.memType.nesDebug)
+    local marioY = emu.read(0x00CE, emu.memType.nesDebug)
     
     local marioX = xHigh * 256 + xLow
-    local marioY = y
-
-    ------------------------------------------------
-    -- VELOCIDADES
-    ------------------------------------------------
-
-    -- Velocidad horizontal
-    local velX = emu.read(0x0057, emu.memType.nesDebug)
-
-    if velX > 127 then
-        velX = velX - 256
-    end
-
-    -- Velocidad vertical
-    local velY = emu.read(0x009F, emu.memType.nesDebug)
-
-    if velY > 127 then
-        velY = velY - 256
-    end
     
+    -- Obtener velocidades
+    local velX, velY = getMarioVelocities()
+    
+    ------------------------------------------------
+    -- CALCULAR FITNESS
+    ------------------------------------------------
     local playerState = emu.read(0x001D, emu.memType.nesDebug)
     local flagTaken = 0
     if playerState == 3 then
@@ -144,59 +279,45 @@ function Main()
     
     local fit = fitness(marioX, frameCount, flagTaken)
     
-    local marioTile = math.floor((marioX / 16) % 32)
+    ------------------------------------------------
+    -- CONSTRUIR MATRIZ DE BLOQUES CON MARIO Y ENEMIGOS
+    ------------------------------------------------
+    local marioBlockX = math.floor(marioX / 16) - 2
+
+    local blocks = getBlockMatrix(marioBlockX)
+
+    placeMarioInMatrix(blocks, marioX, marioY, marioBlockX)
+    placeEnemiesInMatrix(blocks, marioBlockX)
+    
+    ------------------------------------------------
+    -- VISUALIZACIÓN (OPCIONAL)
+    ------------------------------------------------
+    drawBlocks(blocks)
     
     ------------------------------------------------
     -- FILA CSV
     ------------------------------------------------
     local rowData = {}
     
+    -- Inputs (6 columnas)
     table.insert(rowData, Abtn)
     table.insert(rowData, Bbtn)
     table.insert(rowData, UpBtn)
     table.insert(rowData, DownBtn)
     table.insert(rowData, LeftBtn)
     table.insert(rowData, RightBtn)
-    table.insert(rowData, marioX)
-    table.insert(rowData, marioY)
-    table.insert(rowData, velX)
-    table.insert(rowData, velY)
+    
+    -- Fitness (1 columna)
     table.insert(rowData, fit)
     
-    ------------------------------------------------
-    -- BLOQUES
-    ------------------------------------------------
-    for row = 1, 11 do
-        for col = marioTile, marioTile + 6 do
-            local bankCol = math.floor(col / 16) % 2
-            local localOffset = 0
-            if bankCol == 1 then
-                localOffset = 13
-            end
-            
-            local wrappedCol = col % 16
-            local addr = 0x0500 + (row + localOffset) * 16 + wrappedCol
-            local tile = emu.read(addr, emu.memType.nesDebug)
-            
-            table.insert(rowData, classifyTile(tile))
-        end
+    -- Bloques (99 columnas)
+    for i = 1, 99 do
+        table.insert(rowData, blocks[i])
     end
     
-    ------------------------------------------------
-    -- ENEMIGOS
-    ------------------------------------------------
-    for i = 0, 4 do
-        local base = 0x04B0 + i * 4
-        
-        local x1 = emu.read(base + 0, emu.memType.nesDebug)
-        local y1 = emu.read(base + 1, emu.memType.nesDebug)
-        
-        if x1 == 255 then x1 = 0 end
-        if y1 == 255 then y1 = 0 end
-        
-        table.insert(rowData, x1)
-        table.insert(rowData, y1)
-    end
+    -- Velocidades (2 columnas)
+    table.insert(rowData, velX)
+    table.insert(rowData, velY)
     
     ------------------------------------------------
     -- ESCRIBIR CSV
